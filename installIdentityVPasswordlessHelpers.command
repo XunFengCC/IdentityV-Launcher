@@ -345,7 +345,7 @@ INSTALL_MANIFEST_TEMP="$INSTALL_MANIFEST.tmp.$$"
 # though the extract/convert subcommands support JSON.  Parse the generated
 # JSON through the converter instead of rejecting the leading `{`.
 /usr/bin/plutil -convert json -o /dev/null "$INSTALL_MANIFEST_TEMP"
-/usr/bin/plutil -insert idvLoginLaunchdService -string 'system/com.xunfeng.identityv.idv-login' "$INSTALL_MANIFEST_TEMP"
+/usr/bin/plutil -insert idvLoginLaunchdService -string 'system/com.fengyin.identityv.idv-login' "$INSTALL_MANIFEST_TEMP"
 /usr/bin/plutil -insert idvLoginRuntimePlist -string '/var/run/identityv-on-mac/idv-login.plist' "$INSTALL_MANIFEST_TEMP"
 /bin/mv -f "$INSTALL_MANIFEST_TEMP" "$INSTALL_MANIFEST"
 /usr/sbin/chown root:wheel "$INSTALL_MANIFEST"

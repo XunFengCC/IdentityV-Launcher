@@ -96,7 +96,8 @@ state_tool='/Library/PrivilegedHelperTools/identityv-on-mac/identityv-state-tool
 # loaded root job was removed. Preserve the remaining recovery tools instead
 # of deleting their directory underneath a live service.
 if [[ ! -x /Library/PrivilegedHelperTools/identityv-on-mac/stop-idv-login.sh ]] &&
-   /bin/launchctl print system/com.xunfeng.identityv.idv-login >/dev/null 2>&1; then
+   { /bin/launchctl print system/com.fengyin.identityv.idv-login >/dev/null 2>&1 ||
+     /bin/launchctl print system/com.xunfeng.identityv.idv-login >/dev/null 2>&1; }; then
   print -u2 'IDV Login 系统任务仍存在但停止组件缺失；请先修复组件再卸载。'
   exit 1
 fi

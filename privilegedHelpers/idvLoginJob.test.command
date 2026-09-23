@@ -11,7 +11,7 @@ import os,plistlib,subprocess,sys,time
 from pathlib import Path
 p=plistlib.loads(Path(sys.argv[1]).read_bytes())
 root=Path(sys.argv[2])
-assert p['Label']=='com.xunfeng.identityv.idv-login'
+assert p['Label']=='com.fengyin.identityv.idv-login'
 assert len(p['ProgramArguments'])==1 and p['ProgramArguments'][0].endswith('/current/idv-login')
 assert p['EnvironmentVariables']=={'HOME':'/Users/a & b','USER':'fixture','LOGNAME':'fixture','PROGRAMDATA':'/Users/a & b/Library/Application Support','PATH':'/usr/bin:/bin:/usr/sbin:/sbin'}
 assert p['StandardInPath']=='/dev/null'
@@ -23,6 +23,9 @@ start=(root/'start-idv-login.sh').read_text()
 assert 'idv_job_start "$IDV_BIN" "$USER_HOME" "$USER_NAME" "$LOG_FILE"' in start
 assert 'idv_pid="$!"' not in start
 assert 'source "${SELF_PATH:h}/idv-login-job.sh"' in start
+job=(root/'idv-login-job.sh').read_text()
+assert 'for service in "$IDV_JOB_SERVICE" "$IDV_LEGACY_JOB_SERVICE"' in job
+assert job.index('for service in "$IDV_JOB_SERVICE" "$IDV_LEGACY_JOB_SERVICE"') < job.index('if [[ -e "$IDV_JOB_PLIST"')
 print('launchd plist/environment/stop-order contracts passed')
 # Exercise the real lock with unprivileged fixture scripts. A parent start
 # must be able to call Stop for error cleanup without deadlocking, while an

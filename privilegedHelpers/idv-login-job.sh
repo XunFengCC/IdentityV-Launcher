@@ -4,8 +4,9 @@
 # Bootstrap an explicit system job instead, with no inherited App environment.
 # Keep this job ephemeral: it starts only on request, not at boot/login, and
 # never resurrects itself after the user selects Stop.
-readonly IDV_JOB_LABEL="com.xunfeng.identityv.idv-login"
+readonly IDV_JOB_LABEL="com.fengyin.identityv.idv-login"
 readonly IDV_JOB_SERVICE="system/$IDV_JOB_LABEL"
+readonly IDV_LEGACY_JOB_SERVICE="system/com.xunfeng.identityv.idv-login"
 readonly IDV_JOB_DIR="/var/run/identityv-on-mac"
 readonly IDV_JOB_PLIST="$IDV_JOB_DIR/idv-login.plist"
 
@@ -72,7 +73,7 @@ acquire_start_lock() {
   # silently releasing the lock before the protected transaction starts.
 }
 
-idv_job_loaded() { /bin/launchctl print "$IDV_JOB_SERVICE" >/dev/null 2>&1; }
+idv_job_loaded() { /bin/launchctl print "$1" >/dev/null 2>&1; }
 
 idv_job_write_plist() {
   local destination="$1" binary="$2" user_home="$3" user_name="$4" output="$5"
@@ -102,22 +103,27 @@ idv_job_write_plist() {
 }
 
 idv_job_remove() {
-  local attempt
-  if idv_job_loaded; then
-    /bin/launchctl bootout "$IDV_JOB_SERVICE" || {
-      # A concurrently completed exit/removal is harmless; a still-loaded job
-      # is not. Never clean Hosts and then leave a live restart capability.
-      idv_job_loaded && return 1
-    }
-    for attempt in {1..50}; do
-      idv_job_loaded || break
-      /bin/sleep 0.1
-    done
-    if idv_job_loaded; then
-      print -u2 -- 'IDV Login 系统任务尚未退出；未继续清理。'
-      return 1
+  local attempt service
+  # An upgraded helper must remove both the current job and a live job left by
+  # the old installation before replacing the shared plist or cleaning Hosts.
+  # Never proceed if either registration can still restart the proxy.
+  for service in "$IDV_JOB_SERVICE" "$IDV_LEGACY_JOB_SERVICE"; do
+    if idv_job_loaded "$service"; then
+      /bin/launchctl bootout "$service" || {
+        # A concurrently completed exit/removal is harmless; a still-loaded
+        # job is not.
+        idv_job_loaded "$service" && return 1
+      }
+      for attempt in {1..50}; do
+        idv_job_loaded "$service" || break
+        /bin/sleep 0.1
+      done
+      if idv_job_loaded "$service"; then
+        print -u2 -- "IDV Login 系统任务尚未退出：$service；未继续清理。"
+        return 1
+      fi
     fi
-  fi
+  done
   if [[ -e "$IDV_JOB_PLIST" || -L "$IDV_JOB_PLIST" ]]; then
     [[ -f "$IDV_JOB_PLIST" && ! -L "$IDV_JOB_PLIST" && "$(/usr/bin/stat -f '%u' "$IDV_JOB_PLIST")" == 0 ]] || return 1
     /bin/rm -- "$IDV_JOB_PLIST"

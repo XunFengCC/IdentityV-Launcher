@@ -14,7 +14,7 @@
 
 `gameRunnerApp/IdentityV-AGTK.app` 是没有进入当前玩家 App 的历史/开发模板，保留其旧 `...agtkwine` 身份供旧路线辨认，不为表面一致性改变它。四枚已有签名和哈希锁定的 runtime patch 是独立发行输入，本次不重签、不改它们的 ID 或哈希；第三方 Wine、网易下载核心和 `idv-login` 的身份也不改。
 
-有些旧标识必须继续**作为兼容查询目标**出现，不能当成新签名遗漏：IDV Login 安装契约使用的 `system/com.xunfeng.identityv.idv-login` launchd label 保持原值，避免未经授权替换可能有特权的服务；旧浮窗的 `...overlay` / `...monitor-overlay` 仍供精确识别、停止或卸载；旧 runner 和工具箱 ID 仍用于辨认迁移期间可能运行的旧进程。CoreAudio 设备别名 UID `com.xunfeng.identityv.system-default-input.v1` 是音频设备选择契约，保留以免用户的旧选择断开。Swift Dispatch 队列标签不参与 App 身份、TCC 或 Keychain，源码更新它们只是可读性整理。
+有些旧标识必须继续**作为兼容查询目标**出现，不能当成新签名遗漏：新的 IDV Login 临时 launchd 服务是 `system/com.fengyin.identityv.idv-login`，启动和停止组件在替换共享 plist 或清理 Hosts 前也撤销旧 `system/com.xunfeng.identityv.idv-login`，避免升级后两个代理并行；卸载器缺少停止组件时同时检查两种标签。旧浮窗的 `...overlay` / `...monitor-overlay` 仍供精确识别、停止或卸载；旧 runner 和工具箱 ID 仍用于辨认迁移期间可能运行的旧进程。CoreAudio 设备别名 UID `com.xunfeng.identityv.system-default-input.v1` 是音频设备选择契约，保留以免用户的旧选择断开。Swift Dispatch 队列标签不参与 App 身份、TCC 或 Keychain，源码更新它们只是可读性整理。
 
 ## 用户数据、权限和升级
 

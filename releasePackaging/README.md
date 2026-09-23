@@ -4,7 +4,7 @@
 
 ## 版本与当前实物
 
-版本取自 App 的 `IdentityVReleaseVersion`，当前目标是 **1.0.0-rc.1**；`CFBundleVersion` 当前为 `1`。脚本文件名 `buildAlpha1Preview.command` 为兼容既有调用保留的历史名称，不决定版本号或签名方式。实际文件名从 App 元数据产生：
+版本取自 App 的 `IdentityVReleaseVersion`，当前目标是 **1.0.0-rc.1**；`CFBundleVersion` 当前为 `1`。[变更记录](../CHANGELOG.md)给出候选相对当前实际验收的用户/维护者变化与未发布边界。脚本文件名 `buildAlpha1Preview.command` 为兼容既有调用保留的历史名称，不决定版本号或签名方式。实际文件名从 App 元数据产生：
 
 - `第五人格启动器-1.0.0-rc.1.dmg`
 - `第五人格启动器-1.0.0-rc.1-ReleaseMaterials.zip`

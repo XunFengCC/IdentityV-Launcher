@@ -1,33 +1,17 @@
 # 第五人格启动器 · IdentityV Launcher
 
-这是在 Apple Silicon Mac 上运行《第五人格》PC 互通版的非官方项目。**第五人格启动器**供玩家管理国服和国际服的下载、校验、启动、修复、卸载与本地反馈；**第五人格工具箱**供维护者看性能浮窗、启动联合采集并导出诊断。两款 App 同仓，构建、安装和分发各自独立。原创代码采用 [GPL-3.0-or-later](LICENSE)；游戏、Wine、DXMT、网易下载核心和 `idv-login` 各遵循原有来源与许可，见[第三方材料](notices/README.md)。
+**第五人格启动器**是让 Apple Silicon Mac 运行《第五人格》PC 互通版的非官方项目。玩家可以分别管理国服和国际服的下载、校验、启动、修复和卸载；可选的 IDV Login 组件用于相关登录流程。**第五人格工具箱**是单独构建的维护者 App，用于性能浮窗和按需诊断采集，不是玩家安装启动器的必要条件。
 
-目前是 **1.0.0-rc.1 发布准备**，尚未公开发布。独立仓的干净克隆已复建两款 App，玩家 App 的本地候选已通过 Developer ID 签名、公证和 Gatekeeper；这不能据此推定首次安装、所有 macOS 版本或真实对局已通过发行验收。玩家 DMG 仅包含启动器，工具箱供维护者单独使用。启动器内嵌游戏 runner，但不夹带游戏本体、基础 Wine runtime、网易下载核心或可选 `idv-login` 二进制。
+目前正在准备 **1.0.0-rc.1**，**尚无公开下载或正式发布版本**。已有本地候选通过构建、签名和公证，但这不等于首次安装或所有游戏功能均已通过验收。已知待复测的本机现象包括游戏内语音发送未检测到声音、F 区按键行为与预期不符，以及切换窗口时偶发声音异常；在解决和针对性复测前，不把当前候选标为完整可用的公开版本。版本状态与变化见[变更记录](CHANGELOG.md)。
 
-初次接触代码先读[项目地图](projectMap.md)：它解释源码、构建、候选、运行时和测试，并逐项说明本仓当前根文件与顶层目录。想了解为何两款 App 同仓、共享源码和已签补丁如何管理，读[工程边界](docs/engineeringDecisions.md)。玩家可见的当前限制见[随 App 打包的说明](playerLauncherApp/Resources/currentRoute.md)。
+## 安装与首次使用
 
-公开前的第一方 bundle 命名、旧安装数据与权限迁移边界见[身份与兼容方案](docs/firstPartyIdentity.md)；这里的选择不改变 Apple 开发者账号或证书姓名。
+公开发布前请勿从不明来源寻找本项目的安装包。取得将来经过确认的发行 DMG 后，将其中的“第五人格启动器.app”拖入“应用程序”并从那里打开；首次打开、麦克风、可选登录组件等系统提示应核对显示的 App、开发者与所请求的权限。当前候选的开发者签名为 **Qingxiong Yang（Team ID VNTCB2984V）**；bundle 命名中的 `fengyin` 是本项目自选的产品前缀，不是 Apple 账号名称或网址所有权声明。
 
-## 支持范围与现状
+打开启动器后选择国服或国际服，再按界面引导下载并校验游戏文件。两服的游戏和配置目录各自独立，运行环境共用。游戏本体、基础 Wine 运行环境、网易下载核心和可选的 IDV Login 二进制**不包含在启动器安装包内**；需要时会按锁定来源获取并校验。IDV Login 是可选组件，安装或系统信任步骤可能需要管理员授权。[随当前 App 打包的使用说明](playerLauncherApp/Resources/currentRoute.md)解释界面操作和原先完成的兼容路线；**它还未吸收本轮新身份版的实机反馈**，候选最新验收边界以上文和[变更记录](CHANGELOG.md)为准，后续改 App 内说明需随最终候选重新构建。
 
-首版目标是 Apple Silicon Mac 和 macOS 15。可执行文件的静态部署目标检查覆盖 macOS 14，但还需相应系统上的真实首次安装与授权回归。国服曾在本机完成下载、登录、进厅、对局、输入、声音与重启；国际服到达登录/大厅资源阶段，扫码后的登录保持仍待实际用户验证。游戏更新、反作弊和服务端变化可能使旧结果失效。
+首版目标是 Apple Silicon Mac 与 macOS 15。可执行文件有 macOS 14 的静态部署目标检查，但相应系统的真实首次安装与授权还需验证。国服曾在本机完成下载、登录、进厅与对局；这次新身份候选也已进入大厅，但上述输入与音频问题尚待解决。国际服已完成本体下载与首启热更新，实际用户扫码后的登录保持仍待验收。游戏或系统更新可能改变这些结果。
 
-两服的游戏文件与 Wine prefix 独立，运行环境共享。运行环境与可选组件按锁定来源下载和校验；相关契约见[运行环境](runtimeBootstrap/README.md)、[产品目录](productCatalog/products.json)及[IDV Login 组件](idvLoginComponent/README.md)。玩家的已安装 App、游戏数据与 Keychain 身份不由源码目录更名自动改变。
+如需反馈，启动器可在本地生成脱敏诊断包，并交给邮件客户端供你检查后自行发送；应用不会静默发送。原创代码采用 [GPL-3.0-or-later](LICENSE)；游戏、Wine、DXMT、网易下载核心及 IDV Login 遵循各自来源和许可，材料入口见[第三方说明](notices/README.md)。
 
-## 构建、运行、安装
-
-在本仓根目录使用 `devIterate.command`。默认 `build` 只生成候选；`run` 会打开候选，`install` 会更新 `/Applications` 并保留旧 App 备份。阅读脚本不会执行它们，运行前先确认选择的动作。
-
-```zsh
-./devIterate.command launcher build   # playerLauncherApp/build/第五人格启动器.app
-./devIterate.command toolbox build    # maintenanceToolboxApp/build/第五人格工具箱.app
-./devIterate.command keyboard build   # 只构建键盘组件
-```
-
-独立构建入口为 `buildPlayerLauncher.command`、`buildMaintenanceToolbox.command`；`buildGameRunner.command` 负责内嵌 runner。`installIdentityVApps.command` 明确安装目标，先验签、更新 `/Applications` 并备份旧版，失败时尝试恢复。构建目录与真正安装态不要混同；只为检查源码时无须运行安装器。构建输入、签名与候选封包步骤见[发行说明](releasePackaging/README.md)及[签名说明](signing/README.md)。
-
-反馈可从启动器界面生成本地脱敏诊断包，再交由邮件客户端由用户检查并发送；应用不会替用户静默发送。产品源码入口在[playerLauncherApp](playerLauncherApp/README.md)和[maintenanceToolboxApp](maintenanceToolboxApp/README.md)，共有的健康、采样与采集状态逻辑在 `sharedDiagnostics/`。修改用户可见文案时，要核对 App 内说明、发行介绍和实际包内容一致。
-
-## 发行前仍需完成
-
-本仓两款 App 的干净克隆构建和一轮本地发行候选封包已通过；下一步是针对最终候选做干净环境首次安装、TCC/IDV Login 授权、国服对局与国际服登录保持回归。公开仓历史、暂存文件及发行物还须按隐私和许可证逐项审查。签名、公证或源码哈希通过只说明各自所检验的条件，不代表这些真实场景已经完成。
+维护项目请从[开发者指南](docs/developerGuide.md)进入；[项目地图](projectMap.md)列出当前目录和命令职责，[工程取舍](docs/engineeringDecisions.md)保存为什么这样组织。构建、签名和封包各有不同效果，操作前按指南确认目标，不把仓库中的候选当成已安装或已公开版本。

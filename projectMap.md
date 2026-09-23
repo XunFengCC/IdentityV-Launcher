@@ -1,15 +1,6 @@
 # 项目地图：第五人格启动器 · IdentityV Launcher
 
-先读[项目首页](README.md)了解两款 App，再看下方流程图和目录表；想学习“为什么这样组织”，接着读[工程边界](docs/engineeringDecisions.md)。准备修改玩家界面，从[playerLauncherApp](playerLauncherApp/README.md)进入；准备修改工具箱，从[maintenanceToolboxApp](maintenanceToolboxApp/README.md)进入。构建和发行要再读[发行说明](releasePackaging/README.md)。这些文档可直接阅读，`.command`、`.py` 等文件是**可执行操作**，不能当教程随手运行。
-
-| 词 | 在本仓是什么意思 |
-| --- | --- |
-| 源码 | 人编写、编辑的 Swift、Go、C、脚本、资源和配置。改源码不会自动改变已安装 App。 |
-| 构建脚本 | 将源码与指定输入组合为候选的可执行 `.command` 文件；有些脚本会启动游戏、修改安装态或请求管理员授权，需看用途表。 |
-| 构建产物／候选 | `build/`、`.build/` 里的 `.app`、二进制或 DMG；本地候选不等于已安装版或公开发布物。 |
-| 运行时 | 游戏所需 Wine、DXMT、prefix、游戏文件与可选登录组件；仓里有来源和版本契约，用户电脑上的实际安装数据在仓外。 |
-| 测试与夹具 | `Tests/`、`tests/` 中的合约检查，以及 `testFixtures/` 的合成样本；不能替代首次安装和真实对局。 |
-| 发布材料 | 签名、公证后的 App/DMG、第三方许可、对应源码和哈希；与开发候选和当前 `/Applications` 安装态分开。 |
+这是供维护者查找当前源码和命令职责的结构索引；建议从[开发者指南](docs/developerGuide.md)的模块关系和维护顺序开始，再按下表定位。玩家使用入口是[项目首页](README.md)，取舍看[工程边界](docs/engineeringDecisions.md)，版本变化看[变更记录](CHANGELOG.md)。根目录 `.command`、`.py` 是可执行操作，运行效果见下表；细节仍以脚本本身为准。
 
 ```mermaid
 flowchart LR
@@ -63,7 +54,7 @@ flowchart LR
 | `notices/` | 第三方许可、来源及对应源码材料生成入口；`.build/` 是生成目录。 |
 | `signing/` | entitlements、签名/公证脚本及候选第一方 ID 的只读验证；证书私钥留在系统安全存储，不进入 Git。 |
 | `releasePackaging/` | 版本约定、DMG 封包脚本和发行说明；`build/`、`.venv/` 是本机生成目录。 |
-| `docs/` | 可公开的架构、原因、取舍与验证边界说明；`engineeringDecisions.md` 解释工程组织，`firstPartyIdentity.md` 记录第一方身份和旧安装兼容。 |
+| `docs/` | 可公开的开发者框架、原因、取舍、历史命令和验证边界；从 `developerGuide.md` 进入，`engineeringDecisions.md` 解释工程组织，`firstPartyIdentity.md` 记录身份与旧安装兼容。 |
 | `local/` | 本机忽略的隔离候选与临时验证文件；不属于公开源码或已安装版。 |
 | `.build/` | 构建工具自动生成的中间文件，可再生且不进入 Git。 |
 
@@ -71,7 +62,8 @@ flowchart LR
 
 | 文件 | 用途 |
 | --- | --- |
-| `README.md` | 产品、支持范围、日常构建和发行前状态的总入口。 |
+| `README.md` | 给玩家的产品、支持范围、安装与使用入口。 |
+| `CHANGELOG.md` | 已知版本与候选的变化、当前验收边界；未发布内容有明确标记。 |
 | `projectMap.md` | 本页，解释当前新仓结构；顶层对象变化时一起更新。 |
 | `AGENTS.md` | 本仓开发与地图维护约定。 |
 | `LICENSE` | 原创代码许可证。 |
@@ -95,7 +87,6 @@ flowchart LR
 | `buildIdentityVCommandGraveForwarder.command` | 构建键盘补丁；`--install-active` 特殊模式会改旧已装 App。 |
 | `buildIdentityVMouseAccelerationController.command` | 构建鼠标控制程序；`--install-active` 特殊模式会改旧已装 App。 |
 | `stageIdentityVAudioInterposer.command` | 构建并放置音频补丁到项目 runner 模板，可能覆盖模板内前次输出。 |
-| `buildIdentityVOverlayApp.command` | 已退役的旧浮窗构建入口，目前拒绝执行；不是当前工具箱构建方法。 |
 
 ## 根目录文件：会改变运行态或安装态
 
@@ -104,7 +95,6 @@ flowchart LR
 | 文件 | 执行后的主要作用 |
 | --- | --- |
 | `installIdentityVApps.command` | 按 `launcher` 或 `toolbox` 更新 `/Applications` 并备份旧 App。 |
-| `installIdentityVLauncherApp.command` | 旧 `第五人格 Mac.app` 的安装入口，留作兼容/历史操作。 |
 | `installIdentityVIdvLoginLauncherShim.command` | 安装或更新旧登录 shim。 |
 | `installIdentityVPasswordlessHelpers.command` | 安装特权 helper 和授权配置，可能请求管理员权限。 |
 | `restartIdentityVGame.command` | 停止并重启游戏，`--dry-run` 才只观察。 |
@@ -122,4 +112,4 @@ flowchart LR
 | --- | --- |
 | `captureIdentityVDenseMetrics.command` | 采集活动游戏的高密度性能指标并写私人文件；不安装玩家 App。 |
 
-本页是**新产品仓**的当前结构清单。私人项目档案可说明过去的完整目录和原始现场，但公开仓文档不链接私有原文或本机路径。新增、删除、改名顶层对象或改变脚本副作用时，同一变更更新本页、首页入口及相关构建脚本；生成目录只解释用途，不逐个列缓存。发布前复核顶层覆盖、相对链接与清单中的实际构建/安装行为。
+本页只列**现行产品仓**的对象。退出根目录的旧浮窗构建器与独立 runner 安装器及其原因见[历史命令](docs/legacyCommands.md)；历史源码可从 Git 提交读取，不把过期安装器继续当成现役入口。私人项目档案可保存原始现场，本仓文档不依赖其原文或本机路径。新增、删除、改名顶层对象或改变脚本副作用时，同一变更更新本页、首页与开发者指南的相关链接；生成目录只解释用途，不逐个列缓存。发布前复核顶层覆盖、相对链接与清单中的实际构建/安装行为。

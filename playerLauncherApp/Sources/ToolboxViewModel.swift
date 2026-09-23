@@ -699,6 +699,50 @@ final class ToolboxViewModel: ObservableObject {
             return
         }
         guard activeProductAction == nil else { return }
+        // The dual-product buttons enter through the manager, while the older
+        // shortcut enters through launchEmbeddedGameRunner(). Both can create
+        // the same game voice-capture session, so both must settle first-use
+        // microphone authorization before starting Wine. The old shortcut's
+        // request runs in a child process because an unexpected TCC responsible
+        // app can terminate the requester (see MicrophoneAuthorization.swift).
+        if action == .launch || action == .restart {
+            switch MicrophoneAuthorization.status {
+            case .notDetermined:
+                runtimePrerequisiteCheckIsRunning = true
+                showOperation("正在请求麦克风权限（游戏内语音必需），请在系统弹窗上点「允许」。")
+                MicrophoneAuthorization.requestViaHelper { [weak self] resolved in
+                    guard let self else { return }
+                    self.runtimePrerequisiteCheckIsRunning = false
+                    switch resolved {
+                    case .authorized:
+                        self.continueProductAction(action, for: productID, manager: manager)
+                    case .denied, .restricted:
+                        self.clearPendingLauncherHangRestart(for: productID)
+                        self.showOperation(MicrophoneAuthorization.deniedGuidanceMessage, isError: true)
+                        self.openSystemSettings(anchor: "Privacy_Microphone")
+                    default:
+                        // Keep the established shortcut behavior if the helper
+                        // cannot resolve TCC; the game can request access too.
+                        self.showOperation(MicrophoneAuthorization.warningMessage
+                            ?? "麦克风授权状态未知：若语音失败，请到系统设置检查启动器的麦克风权限。",
+                            isError: true)
+                        self.continueProductAction(action, for: productID, manager: manager)
+                    }
+                }
+                return
+            case .denied, .restricted:
+                clearPendingLauncherHangRestart(for: productID)
+                showOperation(MicrophoneAuthorization.deniedGuidanceMessage, isError: true)
+                openSystemSettings(anchor: "Privacy_Microphone")
+                return
+            default:
+                break
+            }
+        }
+        continueProductAction(action, for: productID, manager: manager)
+    }
+
+    private func continueProductAction(_ action: GameProductAction, for productID: GameProductID, manager: URL) {
         clearLaunchFailure()
         clearInstallCompletionPresentation()
         if action == .install {

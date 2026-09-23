@@ -12,7 +12,7 @@
   <key>CFBundleIconFile</key>
   <string>IdentityV</string>
   <key>CFBundleIdentifier</key>
-  <string>com.xunfeng.identityv.mac</string>
+  <string>com.fengyin.identityv.runner</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

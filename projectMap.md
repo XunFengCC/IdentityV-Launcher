@@ -34,7 +34,7 @@ flowchart LR
 | `playerLauncherApp/` | 玩家 App。`Sources/` 是界面和业务逻辑，`Resources/currentRoute.md` 是打进 App 的用户说明，`Assets/` 放图标，`Tests/` 放自检，`PromptHelper/` 和 `MicHelper/` 负责对应系统提示；`build/` 是可再生产物。 |
 | `maintenanceToolboxApp/` | 维护者 App。`Sources/` 是浮窗、采集和界面，`Assets/` 放图标；`build/` 是可再生产物。 |
 | `gameRunnerApp/` | 内嵌 runner 的两个模板 `IdentityV-Mac.app`、`IdentityV-AGTK.app` 及 `tests/`；当前玩家 App 出货的是前者，后者保留供历史/开发测试。模板的 `Contents/` 中有启动脚本、资源和受控预编译输入；`AGTK` 是历史名称，不代表当前主路线使用 Apple GPTK。 |
-| `sharedDiagnostics/` | 两款 App 显式编译的健康检查、资源采样和高密度采集状态源码，包括 `DenseMonitoring.swift`。 |
+| `sharedDiagnostics/` | 两款 App 显式编译的健康检查、资源采样和高密度采集状态源码，以及新旧 bundle 域之间的受限偏好迁移；包括 `DenseMonitoring.swift`、`LegacyPreferences.swift`。 |
 | `gameDownloader/` | 游戏下载、更新和文件校验逻辑。 |
 | `downloaderCoreBootstrap/` | 获取并校验网易下载核心的引导程序；不存放用户账号。 |
 | `productCatalog/` | 两服及其组件的产品目录与锁定配置。 |
@@ -61,9 +61,9 @@ flowchart LR
 | `runtimeAssembly/` | 运行环境补丁 `patches/` 与隔离候选的源码/合约测试；真实本机 runtime、prefix 和旧实验现场不在本仓。 |
 | `testFixtures/` | 无账号、无真实用户现场的合成测试样本。 |
 | `notices/` | 第三方许可、来源及对应源码材料生成入口；`.build/` 是生成目录。 |
-| `signing/` | entitlements、签名/公证脚本及说明；证书私钥留在系统安全存储，不进入 Git。 |
+| `signing/` | entitlements、签名/公证脚本及候选第一方 ID 的只读验证；证书私钥留在系统安全存储，不进入 Git。 |
 | `releasePackaging/` | 版本约定、DMG 封包脚本和发行说明；`build/`、`.venv/` 是本机生成目录。 |
-| `docs/` | 可公开的架构、原因、取舍与验证边界说明。 |
+| `docs/` | 可公开的架构、原因、取舍与验证边界说明；`engineeringDecisions.md` 解释工程组织，`firstPartyIdentity.md` 记录第一方身份和旧安装兼容。 |
 | `local/` | 本机忽略的隔离候选与临时验证文件；不属于公开源码或已安装版。 |
 | `.build/` | 构建工具自动生成的中间文件，可再生且不进入 Git。 |
 

@@ -43,7 +43,7 @@ for stage stage_number in ${(kv)stages}; do
     -Wl,-install_name,"@rpath/${output:t}" \
     -DIDV_AUDIO_STAGE="$stage_number" "${extra_defines[@]}" -framework CoreAudio -framework CoreFoundation \
     "${sources[@]}" -o "$output"
-  codesign --force --sign - "$output"
+  codesign --force --sign - --identifier "com.fengyin.identityv.runner.audio.${stage}" "$output"
   # Deliberately grep, not ripgrep: this verifier must run with only the tools a
   # stock macOS ships.  A missing `rg` was being treated as a failed check and
   # silently skipped the static gate, which is worse than a slower match.

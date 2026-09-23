@@ -285,7 +285,7 @@ final class LauncherHangMonitor: @unchecked Sendable {
         init(session: LauncherGameSession) { self.session = session }
     }
 
-    private let queue = DispatchQueue(label: "com.xunfeng.identityv.launcher-hang-monitor", qos: .utility)
+    private let queue = DispatchQueue(label: "com.fengyin.identityv.launcher-hang-monitor", qos: .utility)
     private let onSuspicion: SuspicionHandler
     private let onRecovery: RecoveryHandler
     private var timer: DispatchSourceTimer?

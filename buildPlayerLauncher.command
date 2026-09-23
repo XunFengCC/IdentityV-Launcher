@@ -59,11 +59,13 @@ THIRD_PARTY_DIR="$RESOURCES_DIR/ThirdParty"
 HEALTH_SOURCE="$PROJECT_ROOT/sharedDiagnostics/GameHealth.swift"
 RESOURCE_SOURCE="$PROJECT_ROOT/sharedDiagnostics/ResourceSampling.swift"
 DENSE_SOURCE="$PROJECT_ROOT/sharedDiagnostics/DenseMonitoring.swift"
+LEGACY_PREF_SOURCE="$PROJECT_ROOT/sharedDiagnostics/LegacyPreferences.swift"
 ENV_SELF_CHECK="$BUILD_ROOT/LauncherEnvironmentSelfTest"
 PROCESS_SELF_CHECK="$BUILD_ROOT/RuntimeProcessMatcherSelfTest"
 INSTALL_ATTEMPT_LOG_SELF_CHECK="$BUILD_ROOT/InstallAttemptLogSelfTest"
 LAUNCH_LOCATION_SELF_CHECK="$BUILD_ROOT/LaunchLocationSelfTest"
 LAUNCHER_HANG_SELF_CHECK="$BUILD_ROOT/LauncherHangSelfTest"
+LEGACY_PREF_SELF_CHECK="$BUILD_ROOT/LegacyPreferenceMigrationSelfTest"
 SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
 GO_BIN="$(/usr/bin/which go 2>/dev/null || true)"
 # 代码签名身份：原因、优先级与边界见 signing/lib/signIdentityV.sh。
@@ -172,6 +174,14 @@ fi
 /bin/rm -rf "$APP_PATH" "$BUILD_ROOT/第五人格 Mac.app" "$BUILD_ROOT/第五人格工具箱.app"
 /bin/mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$HELPERS_DIR" "$THIRD_PARTY_DIR" "$IDV_LOGIN_PAYLOAD_DESTINATION/privilegedHelpers"
 
+/usr/bin/xcrun swiftc -swift-version 5 -warnings-as-errors -O -parse-as-library \
+  -target arm64-apple-macos14.0 -sdk "$SDK_PATH" \
+  "$LEGACY_PREF_SOURCE" \
+  "$SOURCE_ROOT/Tests/LegacyPreferenceMigrationSelfTest.swift" \
+  -o "$LEGACY_PREF_SELF_CHECK"
+"$LEGACY_PREF_SELF_CHECK"
+/bin/rm -f "$LEGACY_PREF_SELF_CHECK"
+
 /usr/bin/xcrun swiftc \
   -swift-version 5 \
   -warnings-as-errors \
@@ -186,6 +196,7 @@ fi
   "$HEALTH_SOURCE" \
   "$RESOURCE_SOURCE" \
   "$DENSE_SOURCE" \
+  "$LEGACY_PREF_SOURCE" \
   "$SOURCE_ROOT"/Sources/*.swift \
   -o "$EXECUTABLE"
 
@@ -196,7 +207,7 @@ fi
   "$PROMPT_PROTOCOL" "$SOURCE_ROOT/PromptHelper/IdentityVHangPrompt.swift" \
   -o "$PROMPT_HELPER"
 "$PROMPT_HELPER" --self-test
-/usr/bin/codesign --force --sign - --identifier com.xunfeng.identityv.launcher.hang-prompt "$PROMPT_HELPER"
+/usr/bin/codesign --force --sign - --identifier com.fengyin.identityv.launcher.hang-prompt "$PROMPT_HELPER"
 
 # 麦克风授权辅助进程（原因/边界见 playerLauncherApp/MicHelper/main.swift）：
 # 真正发起系统申请的是这个子进程，TCC 的责任方因此是启动器（带 NSMicrophoneUsageDescription），
@@ -210,7 +221,7 @@ fi
 # 冒烟自检：只读查询不触发 TCC，任何责任方下都安全；只校验输出契约。
 "$HELPERS_DIR/IdentityVMicrophoneAuthorization" --status | /usr/bin/grep -q '^MICROPHONE_AUTHORIZATION='
 /usr/bin/codesign --force --sign - \
-  --identifier com.xunfeng.identityv.launcher.microphone-authorization \
+  --identifier com.fengyin.identityv.launcher.microphone-authorization \
   "$HELPERS_DIR/IdentityVMicrophoneAuthorization"
 # 输出解析自检（不发起 TCC 调用，任何责任方下都安全）：这道解析决定"继续启动游戏"还是
 # "拦下来引导去设置"，解析错会让她看到与实际不符的提示，所以固定用例钉住行为。
@@ -266,6 +277,9 @@ fi
   -framework AppKit -framework CoreGraphics "$PROJECT_ROOT/gameActivator/main.swift" \
   -o "$RUNNER_DESTINATION_APP/Contents/Resources/IdentityVGameActivator"
 "$RUNNER_DESTINATION_APP/Contents/Resources/IdentityVGameActivator" --self-test
+/usr/bin/codesign --force --sign - \
+  --identifier com.fengyin.identityv.runner.game-activator \
+  "$RUNNER_DESTINATION_APP/Contents/Resources/IdentityVGameActivator"
 /usr/bin/xcrun swiftc \
   -swift-version 5 \
   -warnings-as-errors \
@@ -338,38 +352,41 @@ fi
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.product-manager \
+  --identifier com.fengyin.identityv.launcher.product-manager \
   "$PRODUCT_MANAGER_DESTINATION"
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.download-supervisor \
+  --identifier com.fengyin.identityv.launcher.download-supervisor \
   "$DOWNLOAD_SUPERVISOR_DESTINATION"
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.manifest-planner \
+  --identifier com.fengyin.identityv.launcher.manifest-planner \
   "$MANIFEST_PLANNER_DESTINATION"
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.downloader-core-bootstrap \
+  --identifier com.fengyin.identityv.launcher.downloader-core-bootstrap \
   "$CORE_BOOTSTRAP_DESTINATION"
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.global-adapter \
+  --identifier com.fengyin.identityv.launcher.global-adapter \
   "$GLOBAL_ADAPTER_DESTINATION"
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.runtime-bootstrap \
+  --identifier com.fengyin.identityv.launcher.runtime-bootstrap \
   "$RUNTIME_BOOTSTRAP_DESTINATION"
 /usr/bin/codesign \
   --force \
   --sign - \
-  --identifier com.xunfeng.identityv.toolbox.diagnostic-exporter \
+  --identifier com.fengyin.identityv.launcher.diagnostic-exporter \
   "$DIAGNOSTIC_EXPORTER_DESTINATION"
+/usr/bin/codesign --force --sign - \
+  --identifier com.fengyin.identityv.launcher.idv-login-downloader \
+  "$IDV_LOGIN_DOWNLOADER_DESTINATION"
 # 由内到外签整个启动器 bundle（含内嵌 IdentityVGameRunner.app 与全部辅助二进制，
 # identifier 沿用上面指定的值）。不再用 --deep：它只把外层选项套一遍，内层仍会是
 # ad-hoc，产不出可公证的 Developer ID 树。
@@ -379,6 +396,7 @@ identityv_sign_bundle_tree "$APP_PATH"
 /usr/bin/plutil -lint "$CONTENTS/Info.plist"
 identityv_verify_bundle_tree "$APP_PATH"
 identityv_verify_bundle_tree "$RUNNER_DESTINATION_APP"
+python3 "$PROJECT_ROOT/signing/verifyFirstPartyIdentity.py" launcher "$APP_PATH"
 /bin/zsh "$PROJECT_ROOT/gameRunnerApp/tests/microphonePrivacyContract.test.command" "$APP_PATH"
 /usr/bin/file "$EXECUTABLE"
 

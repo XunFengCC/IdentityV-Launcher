@@ -349,7 +349,11 @@ enum MetalHUDSettings {
 
 #if !MONITOR_PROCESS_SELF_TEST
 @main struct IdentityVMonitorApp: App {
-    @StateObject private var model = MonitorViewModel()
+    @StateObject private var model: MonitorViewModel
+    init() {
+        IdentityVLegacyPreferences.migrateForCurrentApp()
+        _model = StateObject(wrappedValue: MonitorViewModel())
+    }
     var body: some Scene {
         Window("第五人格工具箱", id: "identityv-toolbox") {
             MonitorView().environmentObject(model).frame(minWidth: 620, minHeight: 500)

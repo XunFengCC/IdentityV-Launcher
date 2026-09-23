@@ -1,7 +1,7 @@
 import Foundation
 import CoreMedia
 
-let targetBundleIdentifier = "com.xunfeng.identityv.mac"
+let targetBundleIdentifier = "com.fengyin.identityv.runner"
 let measurementBoundary = "从 macOS CGEvent 的 mouseMoved 时间戳到 ScreenCaptureKit 可见窗口帧变化；不包含鼠标硬件/USB 上报前延迟、显示器扫描输出或面板像素响应。"
 
 func hostClockSeconds() -> Double {

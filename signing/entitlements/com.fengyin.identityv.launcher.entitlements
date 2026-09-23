@@ -5,7 +5,7 @@
 	<!-- 为什么需要：启动器是游戏麦克风访问的**责任 App**（TCC 归属见 MicrophoneAuthorization.swift）。
 	     Hardened Runtime 下 tccd 要求责任 App 带此 entitlement，否则直接判定
 	     "Policy disallows prompt ... access denied"：既不弹窗也不给输入。
-	     2026-09-21 实测证据与验收命令见 ../../diagnostics/20260921DeveloperIDSigning.md。
+	     2026-09-21 旧身份实测揭露此问题；新身份的静态与真实 TCC 验证边界见 docs/firstPartyIdentity.md。
 	     适用条件：只有负责录音/采集的 App 需要；子进程（Wine、辅助工具）从责任 App 获得该判定。 -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>

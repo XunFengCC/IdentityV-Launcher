@@ -49,7 +49,7 @@ fi
   -o "$OUTPUT"
 
 /usr/bin/codesign --force --sign - \
-  --identifier com.xunfeng.identityv.command-grave-forwarder \
+  --identifier com.fengyin.identityv.runner.command-grave-forwarder \
   "$OUTPUT"
 /usr/bin/codesign --verify --strict --verbose=2 "$OUTPUT"
 /usr/bin/otool -D "$OUTPUT" | /usr/bin/tail -n 1 | /usr/bin/grep -qx '@rpath/IdentityVCommandGraveForwarder.dylib'

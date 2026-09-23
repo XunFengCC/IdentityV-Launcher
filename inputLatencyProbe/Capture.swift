@@ -296,7 +296,7 @@ private let machSecondsPerTick: Double = {
 final class FrameRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private let store: SampleStore
     private let sampleQueue = DispatchQueue(
-        label: "com.xunfeng.identityv.input-latency-probe.frames",
+        label: "com.fengyin.identityv.development.input-latency-probe.frames",
         qos: .userInteractive
     )
     private let stateLock = NSLock()

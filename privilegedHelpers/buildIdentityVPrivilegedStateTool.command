@@ -17,7 +17,7 @@ SDK="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
   "$SOURCE" \
   -o "$OUTPUT"
 /bin/chmod 755 "$OUTPUT"
-/usr/bin/codesign --force --sign - --identifier com.xunfeng.identityv.privileged-state "$OUTPUT"
+/usr/bin/codesign --force --sign - --identifier com.fengyin.identityv.installer.privileged-state "$OUTPUT"
 "$OUTPUT" --self-test
 /usr/bin/file "$OUTPUT" | /usr/bin/grep -q 'Mach-O 64-bit executable arm64'
 "$ROOT/runtimeManifest/auditMachODeploymentTargets.command" "$OUTPUT"

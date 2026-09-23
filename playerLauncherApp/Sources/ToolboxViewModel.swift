@@ -556,7 +556,8 @@ final class ToolboxViewModel: ObservableObject {
                 loginProxyReady: processExists && readiness == "ready",
                 loginReadinessProblem: processExists && (readiness == "misconfigured" || readiness == "helper-update-required"),
                 loginComponentVersion: componentVersion,
-                overlayIsRunning: bundleIDs.contains("com.xunfeng.identityv.monitor")
+                overlayIsRunning: bundleIDs.contains("com.fengyin.identityv.toolbox")
+                    || bundleIDs.contains("com.xunfeng.identityv.monitor")
                     || commands.contains("IdentityVMonitor"),
                 checkedAt: Date()
             )
@@ -1468,7 +1469,7 @@ final class ToolboxViewModel: ObservableObject {
         let stdout = Pipe()
         let stderr = Pipe()
         let stderrCollector = BoundedLineCollector()
-        let ioQueue = DispatchQueue(label: "com.xunfeng.identityv.idv-login-download-io")
+        let ioQueue = DispatchQueue(label: "com.fengyin.identityv.idv-login-download-io")
         process.executableURL = ToolboxPath.idvLoginDownloader
         process.arguments = [ToolboxPath.idvLoginManifest.path, downloadCache.path]
         process.standardOutput = stdout
@@ -2468,7 +2469,8 @@ final class ToolboxViewModel: ObservableObject {
 
     private func isGameRunningNow() -> Bool {
         if NSWorkspace.shared.runningApplications.contains(where: {
-            $0.bundleIdentifier == "com.xunfeng.identityv.mac"
+            $0.bundleIdentifier == "com.fengyin.identityv.runner"
+                || $0.bundleIdentifier == "com.xunfeng.identityv.mac"
         }) {
             return true
         }

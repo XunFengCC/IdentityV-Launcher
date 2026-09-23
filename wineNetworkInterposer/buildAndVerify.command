@@ -14,7 +14,7 @@ common_flags=(-mmacosx-version-min=14.0 -O2 -Wall -Wextra -Werror)
 /usr/bin/xcrun --sdk macosx clang -arch x86_64 "${common_flags[@]}" -dynamiclib \
   -Wl,-install_name,@rpath/IdentityVLoginDNSCompat.dylib \
   "$source_file" -o "$output"
-/usr/bin/codesign --force --sign - --identifier com.xunfeng.identityv.login-dns-compat "$output"
+/usr/bin/codesign --force --sign - --identifier com.fengyin.identityv.runner.login-dns-compat "$output"
 /usr/bin/codesign --verify --strict --verbose=2 "$output"
 /usr/bin/file "$output" | /usr/bin/grep -q 'Mach-O 64-bit dynamically linked shared library x86_64'
 /usr/bin/nm -u "$output" | /usr/bin/grep -q '_getaddrinfo'
@@ -26,8 +26,8 @@ common_flags=(-mmacosx-version-min=14.0 -O2 -Wall -Wextra -Werror)
 /usr/bin/xcrun --sdk macosx clang -arch x86_64 "${common_flags[@]}" -dynamiclib \
   -Wl,-no_fixup_chains,-install_name,@rpath/ws2_32.so \
   "$script_dir/dns_fixture.c" -o "$fixture"
-/usr/bin/codesign --force --sign - --identifier com.xunfeng.identityv.login-dns-fixture "$fixture"
-/usr/bin/codesign --force --sign - --identifier com.xunfeng.identityv.login-dns-probe "$probe"
+/usr/bin/codesign --force --sign - --identifier com.fengyin.identityv.development.login-dns-fixture "$fixture"
+/usr/bin/codesign --force --sign - --identifier com.fengyin.identityv.development.login-dns-probe "$probe"
 
 probe_output="$(/usr/bin/arch -x86_64 /usr/bin/env DYLD_INSERT_LIBRARIES="$output" "$probe" "$fixture" 2>&1)"
 print -r -- "$probe_output"

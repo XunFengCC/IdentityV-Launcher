@@ -27,7 +27,8 @@ for app in "${TARGETS[@]}"; do
     destination="$app/Contents/Resources/$resource_name"
     /bin/cp "$source" "$destination"
     /bin/chmod 755 "$destination"
-    /usr/bin/codesign --force --sign - "$destination"
+    /usr/bin/codesign --force --sign - \
+      --identifier "com.fengyin.identityv.runner.audio.${stage}" "$destination"
   done
   /usr/bin/codesign --force --deep --sign - "$app"
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"

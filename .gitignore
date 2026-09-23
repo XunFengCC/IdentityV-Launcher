@@ -10,6 +10,8 @@ gptkReports/
 *.log
 *.trace
 *.profraw
+__pycache__/
+*.pyc
 
 # These tools are rebuilt from the tracked source during a product build.
 denseMetrics/idv-dense-metrics

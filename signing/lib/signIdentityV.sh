@@ -224,7 +224,7 @@ _identityv_sign_loose_macho() {
       [[ "$sign_patches" == 1 ]] || continue
     fi
     _identityv_is_macho "$candidate" || continue
-    # 保留既有 identifier：构建脚本会给辅助二进制指定 com.xunfeng.* 标识，
+    # 保留既有 identifier：构建脚本会给辅助二进制指定 com.fengyin.identityv.* 标识，
     # 重新签名若不保留会退化成 codesign 默认的 <文件名>-<cdhash>。
     identityv_codesign "$candidate" --preserve-metadata=identifier
   done < <(/usr/bin/find "$root" -type f -print0 2>/dev/null)

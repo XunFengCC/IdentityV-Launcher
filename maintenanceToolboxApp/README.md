@@ -1,6 +1,6 @@
 # 第五人格工具箱
 
-这是维护者专用的单一诊断 App，与面向玩家的 RC1 启动器分开构建，也不会进入玩家发行 DMG。产物为 `maintenanceToolboxApp/build/第五人格工具箱.app`；保留既有 bundle identifier `com.xunfeng.identityv.monitor` 和可执行文件 `IdentityVMonitor`，以便复用已授予的本机权限。
+这是维护者专用的单一诊断 App，与面向玩家的 RC1 启动器分开构建，也不会进入玩家发行 DMG。产物为 `maintenanceToolboxApp/build/第五人格工具箱.app`；公开候选的 bundle ID 是 `com.fengyin.identityv.toolbox`，可执行文件仍叫 `IdentityVMonitor`。旧 `com.xunfeng.identityv.monitor` 的偏好和系统授权不能仅凭新名字当作已转移，按[身份与旧安装兼容](../docs/firstPartyIdentity.md)分别处理。
 
 ```zsh
 ./buildMaintenanceToolbox.command

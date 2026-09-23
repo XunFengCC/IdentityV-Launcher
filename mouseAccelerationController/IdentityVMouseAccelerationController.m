@@ -10,7 +10,7 @@
 #import <unistd.h>
 
 static NSString *const kLinearAccelerationKey = @"HIDUseLinearScalingMouseAcceleration";
-static NSString *const kTargetBundleID = @"com.xunfeng.identityv.mac";
+static NSString *const kTargetBundleID = @"com.fengyin.identityv.runner";
 
 typedef struct {
     NSInteger vendorID;

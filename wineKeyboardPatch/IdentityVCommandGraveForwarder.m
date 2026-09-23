@@ -55,7 +55,7 @@ static dispatch_queue_t audioActionQueue(void)
 {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        audioQueue = dispatch_queue_create("com.xunfeng.identityv.audio-key-actions",
+        audioQueue = dispatch_queue_create("com.fengyin.identityv.runner.audio-key-actions",
                                             DISPATCH_QUEUE_SERIAL);
     });
     return audioQueue;

@@ -6,6 +6,8 @@
 
 初次接触代码先读[项目地图](projectMap.md)：它解释源码、构建、候选、运行时和测试，并逐项说明本仓当前根文件与顶层目录。想了解为何两款 App 同仓、共享源码和已签补丁如何管理，读[工程边界](docs/engineeringDecisions.md)。玩家可见的当前限制见[随 App 打包的说明](playerLauncherApp/Resources/currentRoute.md)。
 
+公开前的第一方 bundle 命名、旧安装数据与权限迁移边界见[身份与兼容方案](docs/firstPartyIdentity.md)；这里的选择不改变 Apple 开发者账号或证书姓名。
+
 ## 支持范围与现状
 
 首版目标是 Apple Silicon Mac 和 macOS 15。可执行文件的静态部署目标检查覆盖 macOS 14，但还需相应系统上的真实首次安装与授权回归。国服曾在本机完成下载、登录、进厅、对局、输入、声音与重启；国际服到达登录/大厅资源阶段，扫码后的登录保持仍待实际用户验证。游戏更新、反作弊和服务端变化可能使旧结果失效。

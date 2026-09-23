@@ -12,7 +12,7 @@ OUTPUT="$BUILD_ROOT/IdentityVFunctionKeyController"
 # Exercise the real Swift/IOKit lifetime path without modifying mappings;
 # fake-backend fixtures cannot catch a released event-system client.
 "$OUTPUT" --mapping-status
-/usr/bin/codesign --force --sign - --identifier com.xunfeng.identityv.function-keys "$OUTPUT"
+/usr/bin/codesign --force --sign - --identifier com.fengyin.identityv.runner.function-keys "$OUTPUT"
 /usr/bin/codesign --verify --strict "$OUTPUT"
 "$PROJECT_ROOT/runtimeManifest/auditMachODeploymentTargets.command" "$OUTPUT"
 print -- "Built $OUTPUT"

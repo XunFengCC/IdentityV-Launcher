@@ -4,7 +4,7 @@
     <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
     <key>CFBundleExecutable</key><string>IdentityVMonitor</string>
     <key>CFBundleIconFile</key><string>IdentityVToolbox</string>
-    <key>CFBundleIdentifier</key><string>com.xunfeng.identityv.monitor</string>
+    <key>CFBundleIdentifier</key><string>com.fengyin.identityv.toolbox</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>第五人格工具箱</string>
     <key>CFBundlePackageType</key><string>APPL</string>

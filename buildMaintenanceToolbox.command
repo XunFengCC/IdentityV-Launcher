@@ -13,6 +13,7 @@ DISPLAY_HELPER="$MACOS_DIR/IdentityVOverlayDisplay"
 SAMPLER_SOURCE="$PROJECT_ROOT/denseMetrics/idv-dense-metrics"
 SAMPLER_DESTINATION="$RESOURCES_DIR/idv-dense-metrics"
 DENSE_SOURCE="$PROJECT_ROOT/sharedDiagnostics/DenseMonitoring.swift"
+LEGACY_PREF_SOURCE="$PROJECT_ROOT/sharedDiagnostics/LegacyPreferences.swift"
 OVERLAY_SOURCE="$SOURCE_ROOT/Sources/PerformanceOverlay.swift"
 FREEZE_STACK_SOURCE="$SOURCE_ROOT/Sources/FreezeStackCapture.swift"
 HEALTH_SOURCE="$PROJECT_ROOT/sharedDiagnostics/GameHealth.swift"
@@ -51,6 +52,7 @@ python3 "$PROJECT_ROOT/denseMetrics/testLifecycle.py"
   "$FREEZE_STACK_SOURCE" \
   "$HEALTH_SOURCE" "$RESOURCE_SOURCE" "$PROTOCOL_SOURCE" \
   "$DENSE_SOURCE" \
+  "$LEGACY_PREF_SOURCE" \
   -o "$EXECUTABLE"
 /usr/bin/xcrun swiftc \
   -swift-version 5 -warnings-as-errors -O -parse-as-library \
@@ -66,12 +68,13 @@ python3 "$PROJECT_ROOT/denseMetrics/testLifecycle.py"
 /bin/chmod 644 "$ICON_DESTINATION"
 # 先给两个辅助可执行文件指定稳定 identifier，再由内到外签整个工具箱 bundle。
 # 之前的 `--deep --sign -` 只把外层选项套一遍，且内层代码全部是 ad-hoc，无法公证。
-identityv_codesign "$SAMPLER_DESTINATION" --identifier com.xunfeng.identityv.monitor.sampler
-identityv_codesign "$DISPLAY_HELPER" --identifier com.xunfeng.identityv.monitor.display
+identityv_codesign "$SAMPLER_DESTINATION" --identifier com.fengyin.identityv.toolbox.sampler
+identityv_codesign "$DISPLAY_HELPER" --identifier com.fengyin.identityv.toolbox.display
 identityv_sign_bundle_tree "$APP_PATH"
 
 /usr/bin/plutil -lint "$CONTENTS/Info.plist"
 identityv_verify_bundle_tree "$APP_PATH"
+python3 "$PROJECT_ROOT/signing/verifyFirstPartyIdentity.py" toolbox "$APP_PATH"
 /usr/bin/file "$EXECUTABLE" | /usr/bin/grep -q 'arm64'
 /usr/bin/file "$DISPLAY_HELPER" | /usr/bin/grep -q 'arm64'
 "$PROJECT_ROOT/runtimeManifest/auditMachODeploymentTargets.command" "$APP_PATH"

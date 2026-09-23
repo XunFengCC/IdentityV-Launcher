@@ -33,6 +33,7 @@ struct IdentityVToolboxApp: App {
             alert.runModal()
             exit(0)
         }
+        IdentityVLegacyPreferences.migrateForCurrentApp()
         _model = StateObject(wrappedValue: ToolboxViewModel())
     }
 

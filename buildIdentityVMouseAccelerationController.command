@@ -22,7 +22,7 @@ esac
   -o "$OUTPUT"
 
 /usr/bin/codesign --force --sign - \
-  --identifier com.xunfeng.identityv.mouse-acceleration-controller \
+  --identifier com.fengyin.identityv.runner.mouse-acceleration-controller \
   "$OUTPUT"
 /bin/chmod +x "$OUTPUT"
 

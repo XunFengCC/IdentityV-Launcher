@@ -15,7 +15,7 @@
     <key>CFBundleIconFile</key>
     <string>IdentityVLauncher</string>
     <key>CFBundleIdentifier</key>
-    <string>com.xunfeng.identityv.launcher</string>
+    <string>com.fengyin.identityv.launcher</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

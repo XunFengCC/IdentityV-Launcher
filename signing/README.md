@@ -8,6 +8,6 @@
 
 Hardened Runtime 下，麦克风和 AppleEvents 等受保护能力要求**实际负责请求的 App** 带对应 entitlement。历史上身份切换后若只换签名却未加麦克风 entitlement，会出现“没有授权弹窗且无法录音”；TCC 设置中即使显示已允许，也不能替代二进制实际声明。当前 `entitlements/` 按 bundle ID 定义启动器的麦克风与 AppleEvents、内嵌 runner 的麦克风、工具箱的 AppleEvents；签名脚本按身份应用并在构建中验证。新增能力时先确认责任进程，再改声明和合约测试。
 
-bundle ID、签名团队、Keychain/TCC 身份及用户数据路径是既有安装的兼容契约。源码目录与脚本的语义更名不改变它们。换签名团队或 bundle ID 可能使系统重新要求授权；换机器/用户也需要重新确认。私钥、API key、密码仅在 Keychain 或 owner-only 存储，绝不提交或写入普通日志。`setupLocalDevelopmentSigning.command --create` 和 `setupNotaryCredentials.command` 是需要人有意执行的身份设置操作，**普通构建不会自动创建证书或写凭据**。
+bundle ID、签名团队、Keychain/TCC 身份及用户数据路径是既有安装的兼容契约。公开前第一方 bundle ID 已按[身份与旧安装兼容](../docs/firstPartyIdentity.md)统一到 `com.fengyin.identityv`，旧域偏好和权限仍须分别处理；Apple 签名团队、证书与用户数据路径不随之改变。换 bundle ID 可能使系统重新要求授权；换机器/用户也需要重新确认。私钥、API key、密码仅在 Keychain 或 owner-only 存储，绝不提交或写入普通日志。`setupLocalDevelopmentSigning.command --create` 和 `setupNotaryCredentials.command` 是需要人有意执行的身份设置操作，**普通构建不会自动创建证书或写凭据**。
 
 公证入口是 `notarizeIdentityV.command`；封包器在 Developer ID 模式下先公证并 staple App，再签名、公证并 staple DMG，凭据 profile 从 `IDENTITYV_NOTARY_PROFILE` 读取。缺少所需身份或 profile 应 fail closed。若使用 App Store Connect Team Key，`notarytool` 需要 issuer；Individual Key 不提供 issuer。发行流程与 DMG 验证见[封包说明](../releasePackaging/README.md)。最终候选仍须在干净系统完成首次安装、麦克风和其他 TCC 授权、IDV Login 与游戏回归；签名树、公证和 Gatekeeper 各自只能证明自身检查的边界。

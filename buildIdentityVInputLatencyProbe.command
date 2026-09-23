@@ -27,7 +27,7 @@ SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
   -framework CoreVideo
 
 /usr/bin/codesign --force --sign - \
-  --identifier com.xunfeng.identityv.input-latency-probe \
+  --identifier com.fengyin.identityv.development.input-latency-probe \
   "$OUTPUT"
 /bin/chmod +x "$OUTPUT"
 

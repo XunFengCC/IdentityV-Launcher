@@ -16,7 +16,7 @@ OUTPUT="$BUILD_DIR/IdentityVGameActivator"
   -o "$OUTPUT"
 
 /usr/bin/codesign --force --sign - \
-  --identifier com.xunfeng.identityv.game-activator \
+  --identifier com.fengyin.identityv.runner.game-activator \
   "$OUTPUT"
 /usr/bin/codesign --verify --strict --verbose=2 "$OUTPUT"
 /usr/bin/lipo -verify_arch arm64 "$OUTPUT"

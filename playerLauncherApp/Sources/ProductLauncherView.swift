@@ -63,7 +63,7 @@ struct ProductLauncherView: View {
             Button("继续安装", action: model.acceptLoginInstallationAuthorization)
             Button("取消", role: .cancel, action: model.declineLoginInstallationAuthorization)
         }
-        .alert("idv-login 首次启动需要验证指纹授权", isPresented: loginTrustAuthorizationAlertBinding) {
+        .alert("idv-login 首次启动需要系统授权", isPresented: loginTrustAuthorizationAlertBinding) {
             Button("取消", role: .cancel, action: model.declineLoginCertificateTrustNotice)
             Button("确认", action: acceptLoginTrustAfterAlertDismissal)
         }

@@ -25,7 +25,7 @@
 
 第三方材料生成器仅在 `notices/.build/` 重建忽略的中间产物；封包器在 Developer ID 模式下对 staging App 签名、公证和 staple，再对 DMG 自身签名、公证和 staple。两者分别按适合的 Gatekeeper 类型验收。公证 profile 从 `IDENTITYV_NOTARY_PROFILE` 读取，凭据只放在钥匙串。构建模式为 `auto` 时优先选用可用的 Developer ID，缺 profile 会直接失败。若明确选择 ad-hoc 或本地开发签名，生成物不是普通用户可直接信任的正式候选，需清楚标记为内部测试。
 
-若 App 尚未构建，使用 `./releasePackaging/buildAlpha1Preview.command --rebuild`；该选项调用项目工具箱构建脚本，会改写 `playerLauncherApp/build/第五人格启动器.app`，并按构建脚本实际设置使用签名身份。若需保留默认构建，可先由调用方在隔离目录完成构建，再设置绝对路径 `IDENTITYV_BUILD_ROOT=/绝对构建目录`；封包器会从同一目录读取 App。`--output /绝对输出目录` 可将最终产物及暂存区放到指定位置。省略 `--rebuild` 表示明确封装该路径里现成的 App，不会自动判断它是否为最新源码构建。
+若 App 尚未构建，使用 `./releasePackaging/buildAlpha1Preview.command --rebuild`；该选项调用玩家启动器构建脚本，会改写 `playerLauncherApp/build/第五人格启动器.app`，并按构建脚本实际设置使用签名身份。若需保留默认构建，可先由调用方在隔离目录完成构建，再设置绝对路径 `IDENTITYV_BUILD_ROOT=/绝对构建目录`；封包器会从同一目录读取 App。`--output /绝对输出目录` 可将最终产物及暂存区放到指定位置。省略 `--rebuild` 表示明确封装该路径里现成的 App，不会自动判断它是否为最新源码构建。
 
 首次使用时 `preparePackagingEnvironment.command` 只创建本目录被忽略的 `.venv`，固定安装 `dmgbuild 1.6.7`，不改系统 Python。封包用隔离 staging、禁入内容扫描、运行时补丁哈希校验、签名树验证、麦克风用途声明契约、最高 macOS 部署目标审计和只读 DMG 挂载复验。DMG 可见布局是启动器 App 与指向 `/Applications` 的拖放入口，另带 Finder 背景元数据；游戏、基础 Wine runtime、`DWRG.dmg`、网易下载核心及 `idv-login` 二进制不得进入 App/DMG。
 

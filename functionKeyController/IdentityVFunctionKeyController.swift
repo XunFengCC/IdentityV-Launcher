@@ -88,11 +88,22 @@ private final class HIDMode: ModeBackend {
     }
     func write(_ value: Int) -> Bool {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))
-        guard service != 0 else { return false }; defer { IOObjectRelease(service) }
+        guard service != 0 else {
+            diagnostics.write("F-row mode service unavailable", force: true)
+            return false
+        }; defer { IOObjectRelease(service) }
         var connection: io_connect_t = 0
-        guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &connection) == KERN_SUCCESS else { return false }
+        guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &connection) == KERN_SUCCESS else {
+            diagnostics.write("F-row mode connection unavailable", force: true)
+            return false
+        }
         defer { IOServiceClose(connection) }
-        return IOHIDSetCFTypeParameter(connection, kIOHIDFKeyModeKey as CFString, NSNumber(value: value)) == KERN_SUCCESS && read() == value
+        let set = IOHIDSetCFTypeParameter(connection, kIOHIDFKeyModeKey as CFString, NSNumber(value: value))
+        let verified = read() == value
+        if set != KERN_SUCCESS || !verified {
+            diagnostics.write("F-row mode setter/readback failed requested=\(value) kern=\(set) verified=\(verified)", force: true)
+        }
+        return set == KERN_SUCCESS && verified
     }
 }
 
@@ -185,26 +196,53 @@ private final class HIDUserKeyMapping: UserKeyMappingBackend {
         }
     }
 
+    /// Read-only service inventory for correlating a failed mapping write with
+    /// the actual HID interface; mice may advertise keyboard services too.
+    func deviceSummary() -> String? {
+        return withExtendedLifetime(system) {
+            guard let services = keyboardServices() else { return nil }
+            return services.map { item in
+                let vendor = (IOHIDServiceClientCopyProperty(item.service, kIOHIDVendorIDKey as CFString) as? NSNumber)?.intValue ?? -1
+                let product = (IOHIDServiceClientCopyProperty(item.service, kIOHIDProductIDKey as CFString) as? NSNumber)?.intValue ?? -1
+                return "id=\(item.id) vendor=\(vendor) product=\(product)"
+            }.joined(separator: "\n")
+        }
+    }
+
     func write(_ value: HIDMappingSnapshot, expecting expected: HIDMappingSnapshot) -> Bool {
         return withExtendedLifetime(system) {
         guard let services = keyboardServices(),
               services.map(\.id) == value.services.map(\.registryID),
-              value.services.map(\.registryID) == expected.services.map(\.registryID) else { return false }
+              value.services.map(\.registryID) == expected.services.map(\.registryID) else {
+            diagnostics.write("mapping service set changed before write", force: true)
+            return false
+        }
         for (row, before) in zip(value.services, expected.services) {
             // Recovery includes newly attached/externally changed services in
             // its snapshot, but must never write even identical values to them.
             guard row != before else { continue }
-            guard let service = services.first(where: { $0.id == row.registryID })?.service else { return false }
+            guard let service = services.first(where: { $0.id == row.registryID })?.service else {
+                diagnostics.write("mapping service missing id=\(row.registryID)", force: true)
+                return false
+            }
             // The public API has no atomic compare-and-set. Re-read immediately
             // before each setter; a detected concurrent edit retains the journal
             // so recovery can recompute its remaining per-service work.
             let current = IOHIDServiceClientCopyProperty(service, kIOHIDUserKeyUsageMapKey as CFString)
-            guard pairs(from: current) == before.pairs,
-                  IOHIDServiceClientSetProperty(service,
+            guard pairs(from: current) == before.pairs else {
+                diagnostics.write("mapping service changed id=\(row.registryID)", force: true)
+                return false
+            }
+            guard IOHIDServiceClientSetProperty(service,
                                                 kIOHIDUserKeyUsageMapKey as CFString,
-                                                property(for: row.pairs)) else { return false }
+                                                property(for: row.pairs)) else {
+                diagnostics.write("mapping setter refused id=\(row.registryID)", force: true)
+                return false
+            }
         }
-        return read() == value
+        let verified = read() == value
+        if !verified { diagnostics.write("mapping readback mismatch after write", force: true) }
+        return verified
         }
     }
 
@@ -372,10 +410,16 @@ private final class Lease {
         guard try store.lock() else { return false }
         do {
             guard try recover() else { store.unlock(); return false }
-            guard let original = backend.read() else { throw Failure.unavailable }
+            guard let original = backend.read() else {
+                diagnostics.write("F-row mode read unavailable before enter", force: true)
+                throw Failure.unavailable
+            }
             var mappingJournal: HIDMappingJournal?
             if let mappingBackend {
-                guard let mappingOriginal = mappingBackend.read() else { throw Failure.unavailable }
+                guard let mappingOriginal = mappingBackend.read() else {
+                    diagnostics.write("mapping snapshot unavailable before enter", force: true)
+                    throw Failure.unavailable
+                }
                 let mappingApplied = try mappingBackend.leasedSnapshot(from: mappingOriginal)
                 mappingJournal = .init(original: mappingOriginal, applied: mappingApplied)
             }
@@ -460,6 +504,11 @@ private final class Watch {
                 print("{\"keyboards\":\(snapshot.services.count),\"mappedKeyboards\":\(snapshot.services.filter { !$0.pairs.isEmpty }.count)}")
                 return
             }
+            if args.contains("--mapping-devices") {
+                guard let summary = HIDUserKeyMapping().deviceSummary() else { throw Failure.unavailable }
+                print(summary)
+                return
+            }
             // Manual escape hatch for the 2026-09-18 failure: if a session dies
             // while the F row is standard, the user needs one command that puts
             // the media row back without touching the game.  Refuses while a
@@ -482,6 +531,18 @@ private final class Watch {
             guard getuid() != 0, let path = option("--state-file"), let me = Identity.read(getpid()) else { throw Failure.invalidState }
             let store = try Store(path), lease = Lease(store: store, backend: backend,
                                                       mappingBackend: HIDUserKeyMapping(), owner: me)
+            // A short, recoverable live probe for a keyboard-service failure.
+            // It uses the same journal/lease as --watch and must never compete
+            // with a running game. The caller passes the exact game PID from
+            // the current session; no key events or typed content are read.
+            if args.contains("--diagnose-lease") {
+                guard let gamePID = option("--game-pid").flatMap(Int32.init),
+                      Identity.read(gamePID) == nil else { throw Failure.invalidState }
+                let entered = try lease.enter()
+                defer { try? lease.leave() }
+                print(entered ? "lease entered; restoring" : "lease unavailable")
+                return
+            }
             if args.contains("--guardian") {
                 guard let encoded = option("--owner"), let data = Data(base64Encoded: encoded) else { throw Failure.invalidState }
                 let owner = try JSONDecoder().decode(Identity.self, from: data)

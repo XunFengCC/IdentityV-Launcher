@@ -15,6 +15,7 @@
 - 产品源码迁到独立的 `IdentityV-Launcher` 仓库；玩家 App、维护者工具箱与内嵌 runner 的目录名对应实际职责，共享诊断代码有明确归属。私人旧工程历史与原始现场继续单独保留。
 - 第一方新候选采用 `com.fengyin.identityv` 家族标识；旧身份仍作为受限偏好迁移、服务清理和恢复识别的兼容输入。Apple 开发者 Team、证书、Keychain service/account 和用户运行数据目录未随之改名。
 - 从干净副本重建两款 App；玩家候选完成签名、公证和 Gatekeeper 检查，源码与材料保留确切对应。详细输入、动作和验证界限见[发行说明](releasePackaging/README.md)，它们不等于正式公开发布。
+- 空运行环境首装暴露 bootstrap 与发行 manifest 的共享字段不一致：解析器原先拒绝 staging 使用的 `sourceSha256`，下载尚未开始就失败。现让解析器识别该字段并用真实 manifest 建立回归检查；首装全流程仍以本轮实机结果为准。
 
 **当前验收边界**
 

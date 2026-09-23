@@ -63,3 +63,9 @@ IdentityVRuntimeBootstrap verify-tree --manifest /absolute/runtime-manifest.json
 改动补丁字节的步骤都必须让 staging 脚本刷新这两处哈希，否则 runner 会在启动时以
 `integrity check failed` 中止。已签名补丁的功能尚未在真实游戏中单独回归，替换已装
 runtime 里这四枚文件时应先保留原文件以便回退。
+
+2026-09-23 从空运行环境首装时发现一个先前被已有缓存遮住的失败路径：bootstrap
+以 `DisallowUnknownFields` 解析**同一份** manifest，但原先的 `patchSpec` 漏掉仅供 staging
+使用的 `sourceSha256`，导致下载前立即报 `unknown field "sourceSha256"`。运行时现明确
+识别并校验该字段的格式，仍只用已签名 `sha256` 核验分发字节；测试直接读取随包的真实
+`runtime-manifest.json`，避免只用简化夹具而再次漏掉两端共享字段。

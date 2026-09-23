@@ -130,6 +130,17 @@ func stringsRepeat(s string, n int) string {
 	}
 	return b.String()
 }
+func TestShippedManifestParsesBeforeFirstRuntimeDownload(t *testing.T) {
+	// The first install has no cached runtime to bypass parsing. Keep the
+	// bootstrap decoder in step with the exact manifest copied into the App.
+	path, err := filepath.Abs("runtime-manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readManifest(path); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestManifestRejectsBadURLHashAndPaths(t *testing.T) {
 	m := fixtureManifest()
 	if err := validateManifest(m); err != nil {

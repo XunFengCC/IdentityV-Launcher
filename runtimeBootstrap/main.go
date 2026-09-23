@@ -40,8 +40,12 @@ type fileSpec struct {
 type patchSpec struct {
 	PatchRelativePath  string `json:"patchRelativePath"`
 	TargetRelativePath string `json:"targetRelativePath"`
-	SHA256             string `json:"sha256"`
-	MachOMinOSAtMost   string `json:"machOMinOSAtMost,omitempty"`
+	// Staging validates the unsigned candidate with this hash before signing.
+	// Runtime installation verifies the shipped signed bytes with SHA256 below,
+	// but must still recognize the shared manifest's staging-only field.
+	SourceSHA256     string `json:"sourceSha256,omitempty"`
+	SHA256           string `json:"sha256"`
+	MachOMinOSAtMost string `json:"machOMinOSAtMost,omitempty"`
 }
 type sourceSpec struct {
 	URL                  string   `json:"url"`
@@ -186,7 +190,9 @@ func validateManifest(m manifest) error {
 	}
 	patchTargets := map[string]bool{}
 	for _, p := range m.Patches {
-		if !safeRelative(p.PatchRelativePath) || !safeRelative(p.TargetRelativePath) || !hashRE.MatchString(p.SHA256) || parseVersion(p.MachOMinOSAtMost) < 0 || patchTargets[p.TargetRelativePath] {
+		if !safeRelative(p.PatchRelativePath) || !safeRelative(p.TargetRelativePath) ||
+			(p.SourceSHA256 != "" && !hashRE.MatchString(p.SourceSHA256)) ||
+			!hashRE.MatchString(p.SHA256) || parseVersion(p.MachOMinOSAtMost) < 0 || patchTargets[p.TargetRelativePath] {
 			return errors.New("invalid patch specification")
 		}
 		patchTargets[p.TargetRelativePath] = true

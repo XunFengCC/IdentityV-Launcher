@@ -1,0 +1,101 @@
+From: IdentityV on Mac maintainers
+Subject: [PATCH] winecoreaudio: expose only the default capture device on macOS
+
+Product policy: Windows applications running in this Wine distribution see one
+capture endpoint: macOS's current default input device. Render endpoint
+enumeration remains unchanged.
+
+This patch is rebased against the CoreAudio source file in the pinned
+CodeWeavers 26.1 source archive. Capture never queries
+kAudioHardwarePropertyDevices. If no valid default input is available it
+returns a successful empty Capture list rather than falling back to global
+enumeration.
+
+diff --git a/dlls/winecoreaudio.drv/coreaudio.c b/dlls/winecoreaudio.drv/coreaudio.c
+index 3199887b1cc..0f5d55f261c 100644
+--- a/dlls/winecoreaudio.drv/coreaudio.c
++++ b/dlls/winecoreaudio.drv/coreaudio.c
+@@ -254,38 +254,58 @@
+ 
+     size = sizeof(default_id);
+     sc = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, NULL, &size, &default_id);
+-    if(sc != noErr){
+-        WARN("Getting _DefaultInputDevice property failed: %x\n", (int)sc);
+-        default_id = -1;
++    if(params->flow == eCapture){
++        /* Do not enumerate global devices: that wakes Continuity inputs. */
++        if(sc != noErr || default_id == kAudioObjectUnknown){
++            WARN("Getting default input device failed: %x\n", (int)sc);
++            params->result = S_OK;
++            return STATUS_SUCCESS;
++        }
++        num_devices = 1;
++        devices = malloc(sizeof(*devices));
++        if(!devices){
++            params->result = E_OUTOFMEMORY;
++            return STATUS_SUCCESS;
++        }
++        devices[0] = default_id;
+     }
++    else{
++        if(sc != noErr){
++            WARN("Getting _DefaultInputDevice property failed: %x\n", (int)sc);
++            default_id = -1;
++        }
+ 
+-    addr.mSelector = kAudioHardwarePropertyDevices;
+-    sc = AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &addr, 0, NULL, &devsize);
+-    if(sc != noErr){
+-        WARN("Getting _Devices property size failed: %x\n", (int)sc);
+-        params->result = osstatus_to_hresult(sc);
+-        return STATUS_SUCCESS;
+-    }
++        addr.mSelector = kAudioHardwarePropertyDevices;
++        sc = AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &addr, 0, NULL, &devsize);
++        if(sc != noErr){
++            WARN("Getting _Devices property size failed: %x\n", (int)sc);
++            params->result = osstatus_to_hresult(sc);
++            return STATUS_SUCCESS;
++        }
+ 
+-    num_devices = devsize / sizeof(AudioDeviceID);
+-    devices = malloc(devsize);
++        num_devices = devsize / sizeof(AudioDeviceID);
++        devices = malloc(devsize);
++        if(!devices){
++            params->result = E_OUTOFMEMORY;
++            return STATUS_SUCCESS;
++        }
++
++        sc = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, NULL, &devsize, devices);
++        if(sc != noErr){
++            WARN("Getting _Devices property failed: %x\n", (int)sc);
++            free(devices);
++            params->result = osstatus_to_hresult(sc);
++            return STATUS_SUCCESS;
++        }
++    }
++
+     info = malloc(num_devices * sizeof(*info));
+-    if(!devices || !info){
+-        free(info);
++    if(!info){
+         free(devices);
+         params->result = E_OUTOFMEMORY;
+         return STATUS_SUCCESS;
+     }
+ 
+-    sc = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, NULL, &devsize, devices);
+-    if(sc != noErr){
+-        WARN("Getting _Devices property failed: %x\n", (int)sc);
+-        free(info);
+-        free(devices);
+-        params->result = osstatus_to_hresult(sc);
+-        return STATUS_SUCCESS;
+-    }
+-
+     addr.mScope = get_scope(params->flow);
+     addr.mElement = 0;
+ 
+-- 
+2.47.0

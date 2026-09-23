@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "component": "wine-runtime",
+  "version": "wine11-codeweavers-26.1-dxmt-0.80-macos15-alpha1-r1",
+  "minimumMacOS": "15.0",
+  "source": {
+    "url": "https://github.com/novak037/yanyun-on-mac/releases/download/v0.1.2/DWRG.dmg",
+    "allowedRedirectHosts": ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"],
+    "byteCount": 326791695,
+    "sha256": "69b79d250b794af8289b6e57e50c675d5ba37b7bd6bd74dbc3dee392f5248a96",
+    "runtimeRoot": "第五人格模拟器.app/Contents/Resources/wine-release"
+  },
+  "sourceVerificationFiles": [
+    {"relativePath": "lib/wine/x86_64-unix/wine", "sha256": "5e652db558d32decea27a6c2ea3ec704f5da51eb8b762529793eb7de3bc16c45", "executable": true},
+    {"relativePath": "bin/wineserver", "sha256": "8fb30d3e5a4a60666132c8a3f91cf3dfea3b4f21f9ea5660da4d65388ce8a4fe", "executable": true},
+    {"relativePath": "lib/dxmt/x86_64-windows/winemetal.dll", "sha256": "514245d533c750599614311a792c45ed600aef52948571d98c0fc70fd3df16e0"},
+    {"relativePath": "lib64/libMoltenVK.dylib", "sha256": "e1c3e9c119157981e72a63554cb8155a6e81a1f392f4a9e3666e56862c4fb208"}
+  ],
+  "patches": [
+    {"patchRelativePath": "winemac.so", "targetRelativePath": "lib/wine/x86_64-unix/winemac.so", "sourceSha256": "bd64b3bd5b53a0939a0535f62743a6a26cd3cd1d9e5b66a27e9456de37444e1a", "sha256": "365fefb1c0bf4c0e54f4fd3a00dbd44bd9a6febc75209846b6de2c270bdb9c60", "machOMinOSAtMost": "15.0"},
+    {"patchRelativePath": "libgmp.10.dylib", "targetRelativePath": "lib64/libgmp.10.dylib", "sourceSha256": "b25b382a90dda844517078c7d3dda3a44bd4a10c99bbd86aad37b0a90c8d589a", "sha256": "59d1716ebecde1ce8cb9dac1d402dcf5cb377eba5059762be79a4cdd519a9182", "machOMinOSAtMost": "15.0"},
+    {"patchRelativePath": "libpcre2-8.0.dylib", "targetRelativePath": "lib64/libpcre2-8.0.dylib", "sourceSha256": "09b6e680ccd8ca452a88d08981593237986ef58576a903290df74dd9a7696e00", "sha256": "b2138825dd47d774fa5abd855f6bbf8aa61693bbe8df324132a5b3f6c6d0d292", "machOMinOSAtMost": "15.0"},
+    {"patchRelativePath": "libzstd.1.dylib", "targetRelativePath": "lib64/libzstd.1.dylib", "sourceSha256": "d5894bcd6c7eac70765f7d5186c5c98537ee983d89f240b6a47b93bac1c7b314", "sha256": "0d18032a7b715bcf0782e5309e8b3b89c2c8e44f3c9c6857f38397e6e520722b", "machOMinOSAtMost": "15.0"}
+  ],
+  "finalVerificationFiles": [
+    {"relativePath": "lib/wine/x86_64-unix/wine", "sha256": "5e652db558d32decea27a6c2ea3ec704f5da51eb8b762529793eb7de3bc16c45", "executable": true},
+    {"relativePath": "bin/wineserver", "sha256": "8fb30d3e5a4a60666132c8a3f91cf3dfea3b4f21f9ea5660da4d65388ce8a4fe", "executable": true},
+    {"relativePath": "lib/wine/x86_64-unix/winemac.so", "sha256": "365fefb1c0bf4c0e54f4fd3a00dbd44bd9a6febc75209846b6de2c270bdb9c60"},
+    {"relativePath": "lib64/libgmp.10.dylib", "sha256": "59d1716ebecde1ce8cb9dac1d402dcf5cb377eba5059762be79a4cdd519a9182"},
+    {"relativePath": "lib64/libpcre2-8.0.dylib", "sha256": "b2138825dd47d774fa5abd855f6bbf8aa61693bbe8df324132a5b3f6c6d0d292"},
+    {"relativePath": "lib64/libzstd.1.dylib", "sha256": "0d18032a7b715bcf0782e5309e8b3b89c2c8e44f3c9c6857f38397e6e520722b"},
+    {"relativePath": "lib/dxmt/x86_64-unix/winemetal.so", "sha256": "16e32803d0d25d3bb41d59e1560f00d0919d76c6fa9b21dbe0ef827bb213faf0", "machOMinOSAtMost": "15.0"}
+  ]
+}

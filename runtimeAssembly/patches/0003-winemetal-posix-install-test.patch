@@ -1,0 +1,17 @@
+From upstream DXMT v0.80
+Subject: [PATCH] winemetal: use a POSIX shell conditional in install helper
+
+Meson runs this helper under /bin/sh.  `==` is not POSIX and fails under
+the macOS POSIX shell; quote the positional argument and use `=` instead.
+This affects only the isolated candidate install helper.
+
+--- a/src/winemetal/unix/install.sh
++++ b/src/winemetal/unix/install.sh
+@@ -7,6 +7,6 @@
+ cp "${MESON_BUILD_ROOT}/src/winemetal/unix/winemetal.so" "${INSTALL_DIR}/winemetal.so"
+ 
+ 
+-if [ $1 == "true" ]; then
++if [ "$1" = "true" ]; then
+     strip "${INSTALL_DIR}/winemetal.so" -x
+ fi

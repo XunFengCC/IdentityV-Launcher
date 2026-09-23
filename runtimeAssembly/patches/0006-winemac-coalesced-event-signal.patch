@@ -1,0 +1,89 @@
+--- a/dlls/winemac.drv/cocoa_event.h
++++ b/dlls/winemac.drv/cocoa_event.h
+@@ -41,6 +41,9 @@
+ {
+     NSMutableArray* events;
+     NSLock*         eventsLock;
++    /* Protected by eventsLock.  This is an edge notification state, not a
++       queue-nonempty level. */
++    BOOL            event_signal_pending;
+ 
+     int             fds[2]; /* Pipe signaling when there are events queued. */
+     int             kq; /* kqueue for waiting in OnMainThread(). */
+--- a/dlls/winemac.drv/cocoa_event.m
++++ b/dlls/winemac.drv/cocoa_event.m
+@@ -119,6 +119,7 @@
+             event_handler = handler;
+             events = [[NSMutableArray alloc] init];
+             eventsLock = [[NSLock alloc] init];
++            event_signal_pending = NO;
+ 
+             if (!events || !eventsLock)
+             {
+@@ -177,8 +178,31 @@
+         if (fds[1] != -1) close(fds[1]);
+ 
+         [super dealloc];
++    }
++
++    /* eventsLock must be held.  One posted-event edge is enough until the
++       consumer drains the pipe and clears event_signal_pending under the same
++       lock. */
++    - (void) signalPostedEventAvailableLocked
++    {
++        char junk = 1;
++        int rc;
++
++        if (event_signal_pending) return;
++
++        do
++        {
++            rc = write(fds[1], &junk, 1);
++        } while (rc < 0 && errno == EINTR);
++
++        if (rc == 1 || (rc < 0 && errno == EAGAIN))
++            event_signal_pending = YES;
++        else if (rc < 0)
++            ERR(@"%@: got error writing to event queue signaling pipe: %s\n", self, strerror(errno));
+     }
+ 
++    /* Force wake retained for OnMainThread().  It deliberately does not
++       participate in posted-event coalescing. */
+     - (void) signalEventAvailable
+     {
+         char junk = 1;
+@@ -232,9 +256,8 @@
+         else
+             [events addObject:event];
+ 
++        [self signalPostedEventAvailableLocked];
+         [eventsLock unlock];
+-
+-        [self signalEventAvailable];
+     }
+ 
+     - (void) postEvent:(macdrv_event*)inEvent
+@@ -251,6 +274,8 @@
+         NSUInteger index;
+         MacDrvEvent* ret = nil;
+ 
++        [eventsLock lock];
++
+         /* Clear the pipe which signals there are pending events. */
+         do
+         {
+@@ -262,10 +287,13 @@
+                 ERR(@"%@: event queue signaling pipe unexpectedly closed\n", self);
+             else
+                 ERR(@"%@: got error reading from event queue signaling pipe: %s\n", self, strerror(errno));
++            [eventsLock unlock];
+             return nil;
+         }
+ 
+-        [eventsLock lock];
++        /* Do not make this a level trigger: unmatched events remain queued,
++           but only a later posted event creates the next wake edge. */
++        event_signal_pending = NO;
+ 
+         index = 0;
+         while (index < [events count])

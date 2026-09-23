@@ -1,0 +1,18 @@
+# Alpha 1 notice/source input lock.  Fields are tab-separated:
+# group	output-relative-path	HTTPS URL	allowed redirect hosts (comma-separated)
+# max bytes	SHA-256	purpose
+#
+# This intentionally has no entry for DWRG.dmg, the base Wine/GStreamer closure,
+# game files, downloadIPC.exe, OrbitSDK.dll, aria2c.exe, mpay.dll, or any
+# idv-login source archive.  The upstream codeload archive currently contains
+# those Windows binaries, so it must not be repackaged by this project.
+license	ThirdPartyNotices/licenses/idv-login-GPL-3.0-or-later.txt	https://raw.githubusercontent.com/KKeygen/idv-login/389d23a7763fe9e5985cb77a3114b8c4dcb670e1/LICENSE	raw.githubusercontent.com	131072	3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986	idv-login 6.3.0 stable GPL-3.0-or-later license text; source acquisition is described separately without redistributing its binary-containing archive
+source	CorrespondingSources/Wine/crossover-sources-26.1.0.tar.gz	https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.1.0.tar.gz	media.codeweavers.com	209715200	e4ec87d5821a009dd1f1d2e36ffe2e24b8fcbae9516375ea42f95a16928ab8fa	Complete CodeWeavers 26.1 source archive containing the Wine 11 source used for the modified winemac.so
+source	CorrespondingSources/GMP/gmp-6.3.0.tar.xz	https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz	ftp.gnu.org	8388608	a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898	GMP 6.3.0 source used for the replacement dylib
+source	CorrespondingSources/PCRE2/pcre2-10.47.tar.bz2	https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.bz2	github.com,release-assets.githubusercontent.com,objects.githubusercontent.com	8388608	47fe8c99461250d42f89e6e8fdaeba9da057855d06eb7fc08d9ca03fd08d7bc7	PCRE2 10.47 source used for the replacement dylib
+source	CorrespondingSources/zstd/zstd-1.5.7.tar.zst	https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.zst	github.com,release-assets.githubusercontent.com,objects.githubusercontent.com	8388608	5b331d961d6989dc21bb03397fc7a2a4d86bc65a14adc5ffbbce050354e30fd2	zstd 1.5.7 source used for the replacement dylib
+license	ThirdPartyNotices/licenses/Wine-LGPL-2.1-or-later.txt	https://gitlab.winehq.org/wine/wine/-/raw/wine-11.0/COPYING.LIB	gitlab.winehq.org	131072	e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c	Wine LGPL-2.1-or-later text
+license	ThirdPartyNotices/licenses/zmq4-BSD-3-Clause.txt	https://raw.githubusercontent.com/go-zeromq/zmq4/v0.17.0/LICENSE	raw.githubusercontent.com	131072	3496bb5cbe8a44f2db5aec5268e67630f31e07179efeceda336aab3b17c7a3b7	go-zeromq/zmq4 v0.17.0 license
+license	ThirdPartyNotices/licenses/x-sync-BSD-3-Clause.txt	https://raw.githubusercontent.com/golang/sync/v0.7.0/LICENSE	raw.githubusercontent.com	131072	2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067	golang.org/x/sync v0.7.0 license
+license	ThirdPartyNotices/licenses/x-text-BSD-3-Clause.txt	https://raw.githubusercontent.com/golang/text/v0.15.0/LICENSE	raw.githubusercontent.com	131072	2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067	golang.org/x/text v0.15.0 license
+license	ThirdPartyNotices/licenses/xxhash-MIT.txt	https://raw.githubusercontent.com/cespare/xxhash/v2.3.0/LICENSE.txt	raw.githubusercontent.com	131072	f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c	cespare/xxhash/v2 v2.3.0 license

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "component": "netease-download-core",
+  "acquisition": {
+    "mode": "download-on-first-use",
+    "repository": "https://github.com/KKeygen/idv-login",
+    "commit": "9b1ff598da6cb9ae6a952a8978ccf88bc8b2ae5c",
+    "sourceBaseURL": "https://raw.githubusercontent.com/KKeygen/idv-login/9b1ff598da6cb9ae6a952a8978ccf88bc8b2ae5c/binaries/",
+    "note": "Matches idv-login 6.2.3's acquisition model, but is implemented by the launcher with pinned hashes; idv-login remains login-only at runtime."
+  },
+  "observedAuthenticodeLeaf": "NetEase (Hangzhou) Network Co., Ltd",
+  "redistributionStatus": "not-bundled-download-on-first-use",
+  "files": [
+    {
+      "filename": "downloadIPC.exe",
+      "byteCount": 34378168,
+      "sha256": "5c11d3188d271c1df88d36d98bb440437d29e8a41c88dfd38602ce3c60c56f82"
+    },
+    {
+      "filename": "OrbitSDK.dll",
+      "byteCount": 8287224,
+      "sha256": "b46c0f57bcf2c7b138a9f46edb1620af415bde39596ae668baec1016c0cdcb8a"
+    },
+    {
+      "filename": "aria2c.exe",
+      "byteCount": 5607360,
+      "sha256": "76f1052d42ca04658e64a800da5fb6e9713cf073cbac0ae1feca5ecff63c2062"
+    }
+  ]
+}

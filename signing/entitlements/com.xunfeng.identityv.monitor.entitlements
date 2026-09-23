@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 为什么需要：工具箱的「打开报告目录」用 NSWorkspace.activateFileViewerSelecting，
+	     它经 appleeventsd 控制 Finder。Hardened Runtime 下 tccd 要求访问方带此 entitlement，
+	     缺失时被拒（2026-09-21 tccd 实测：service kTCCServiceAppleEvents requires entitlement
+	     com.apple.security.automation.apple-events but it is missing for
+	     accessing={com.xunfeng.identityv.monitor}），表现为在 Finder 中显示无效。
+	     适用条件：只为这条 reveal 路径声明；工具箱不采集麦克风/摄像头，故不给其它权限。
+	     原因与验收见 ../../diagnostics/20260921MicrophoneEntitlement.md。 -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

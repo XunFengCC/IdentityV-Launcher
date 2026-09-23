@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "selectedEngineId": "wine11-codeweavers-26_1-dxmt-0_80",
+  "lastKnownGoodEngineId": "wine10-sikarugir-10_0-r6-dxmt",
+  "engines": {
+    "wine11-codeweavers-26_1-dxmt-0_80": {
+      "gameRoot": {
+        "volumeUUID": "30FB9289-1B60-4690-9934-14E5E13D0001",
+        "relativePath": "Projects/IdentityV Mac/GameRoot-repaired-20260629-1710"
+      },
+      "runtime": {
+        "volumeUUID": "30FB9289-1B60-4690-9934-14E5E13D0001",
+        "relativePath": "Projects/IdentityV Mac/runtimes/wine11-codeweavers-26.1-dxmt-0.80"
+      },
+      "prefix": {
+        "volumeUUID": "30FB9289-1B60-4690-9934-14E5E13D0001",
+        "relativePath": "Projects/IdentityV Mac/prefixes/wine11-alpha1"
+      }
+    },
+    "wine10-sikarugir-10_0-r6-dxmt": {
+      "gameRoot": {
+        "volumeUUID": "30FB9289-1B60-4690-9934-14E5E13D0001",
+        "relativePath": "Projects/IdentityV Mac/GameRoot-repaired-20260629-1710"
+      },
+      "runtime": {
+        "volumeUUID": "30FB9289-1B60-4690-9934-14E5E13D0001",
+        "relativePath": "Projects/IdentityV Mac/sikarugir-engines/WS12WineSikarugir10.0_6_DXMT/wswine.bundle"
+      },
+      "prefix": {
+        "volumeUUID": "30FB9289-1B60-4690-9934-14E5E13D0001",
+        "relativePath": "Projects/IdentityV Mac/WineStagingPrefixFromCrossOver"
+      }
+    }
+  }
+}

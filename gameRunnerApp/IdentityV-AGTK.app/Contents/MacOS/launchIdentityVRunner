@@ -1,0 +1,1566 @@
+#!/bin/zsh
+set -u
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  print -u2 -r -- "Identity V launcher must run in the signed-in macOS user session, not as root"
+  exit 1
+fi
+
+# Player-facing builds keep only small, bounded launcher/session facts.  New
+# files are private by default; no input events, screenshots, audio, chat or
+# account data are sampled.
+umask 077
+
+APP_CONTENTS="${0:A:h:h}"
+CONFIG_DIR="$HOME/Library/Application Support/IdentityVOnMac"
+LOG_DIR="$HOME/Library/Logs/IdentityVOnMac"
+CATALOG_FILE="$APP_CONTENTS/Resources/runtime-catalog.json"
+INSTALLATION_FILE="$CONFIG_DIR/installation.json"
+RUNTIME_BINDING_FILE="$CONFIG_DIR/runtime-binding.json"
+PRODUCTS_FILE="$CONFIG_DIR/products.json"
+COMMAND_GRAVE_FORWARDER="$APP_CONTENTS/Resources/IdentityVCommandGraveForwarder.dylib"
+LOGIN_DNS_COMPAT="$APP_CONTENTS/Resources/IdentityVLoginDNSCompat.dylib"
+IDV_LOGIN_START_HELPER="/Library/PrivilegedHelperTools/identityv-on-mac/start-idv-login.sh"
+AUDIO_INTERPOSER_RESOURCE_DIR="$APP_CONTENTS/Resources"
+# The HUD is a per-game diagnostic. Never let a terminal, GUI session or old
+# launcher setting leak it into Wine bootstrapping or helper processes. It is
+# added back only around the direct final dwrg.exe command.
+clear_metal_hud_environment() {
+  unset MTL_HUD_ENABLED MTL_HUD_LOG_ENABLED MTL_HUD_LOG_SHADER_ENABLED \
+    MTL_HUD_CONFIG MTL_HUD_CONFIG_FILE MTL_HUD_DISABLE_MENU_BAR MTL_HUD_ELEMENTS \
+    MTL_HUD_OPACITY MTL_HUD_SCALE MTL_HUD_ALIGNMENT MTL_HUD_POSITION_X \
+    MTL_HUD_POSITION_Y MTL_HUD_SHOW_METRICS_RANGE MTL_HUD_ENCODER \
+    MTL_HUD_ENCODER_TIMING_ENABLED MTL_HUD_ENCODER_TIMING MTL_HUD_INSIGHTS \
+    MTL_HUD_INSIGHTS_ENABLED MTL_HUD_REPORT_URL MTL_HUD_SHOW_ZERO_METRICS \
+    MTL_HUD_RUSAGE_UPDATE_INTERVAL MTL_HUD_METRIC_TIMEOUT
+}
+clear_metal_hud_environment
+/bin/mkdir -p "$LOG_DIR"
+/bin/chmod 700 "$CONFIG_DIR" "$LOG_DIR" 2>/dev/null || true
+
+abort_launcher() {
+  print -u2 -r -- "Identity V launcher preflight failed: $*"
+  exit 1
+}
+
+PREFLIGHT_ONLY=0
+if [[ "${1:-}" == "--preflight" ]]; then
+  PREFLIGHT_ONLY=1
+elif [[ "${1:-}" != "--run" ]]; then
+  BOOT_LOG="$LOG_DIR/identityv-app-dispatch-$(/bin/date '+%Y%m%d-%H%M%S').log"
+  /usr/bin/nohup /bin/zsh "$0" --run "$@" >>"$BOOT_LOG" 2>&1 &
+  disown $! >/dev/null 2>&1 || true
+  exit 0
+fi
+shift
+
+PRODUCT="mainland"
+if [[ "${1:-}" == "--product" ]]; then
+  PRODUCT="${2:-}"
+  shift 2
+fi
+[[ "$PRODUCT" == "mainland" || "$PRODUCT" == "global" ]] || abort_launcher "product must be mainland or global"
+[[ $# -eq 0 ]] || abort_launcher "unexpected launcher argument"
+
+plist_raw() {
+  local file="$1"
+  local key_path="$2"
+  local value
+  # macOS 15 plutil writes missing-key diagnostics to stdout, not stderr.
+  # Publish only successful extraction output, preserving failure for callers.
+  value="$(/usr/bin/plutil -extract "$key_path" raw -o - "$file" 2>/dev/null)" || return $?
+  print -r -- "$value"
+}
+
+validate_relative_path() {
+  local relative_path="$1"
+  [[ -n "$relative_path" && "$relative_path" != /* ]] || return 1
+  [[ "$relative_path" != *$'\n'* && "$relative_path" != *$'\r'* ]] || return 1
+  case "/$relative_path/" in
+    *'/../'*|*'/./'*|*'//'*) return 1 ;;
+  esac
+  return 0
+}
+
+resolve_volume_item() {
+  local label="$1"
+  local volume_uuid="$2"
+  local relative_path="$3"
+  local info mount_point actual_uuid resolved_mount candidate resolved_candidate
+
+  [[ -n "$volume_uuid" && "$volume_uuid" != *[!0-9A-Fa-f-]* ]] || abort_launcher "$label has an invalid volume UUID"
+  validate_relative_path "$relative_path" || abort_launcher "$label has an unsafe relative path"
+  info="$(/usr/sbin/diskutil info -plist "$volume_uuid" 2>/dev/null)" || abort_launcher "$label volume is unavailable ($volume_uuid)"
+  mount_point="$(print -r -- "$info" | /usr/bin/plutil -extract MountPoint raw -o - - 2>/dev/null)"
+  actual_uuid="$(print -r -- "$info" | /usr/bin/plutil -extract VolumeUUID raw -o - - 2>/dev/null)"
+  [[ -n "$mount_point" && "${actual_uuid:u}" == "${volume_uuid:u}" ]] || abort_launcher "$label volume identity does not match"
+  resolved_mount="$(/bin/realpath "$mount_point" 2>/dev/null)" || abort_launcher "$label volume is not mounted"
+  candidate="$resolved_mount/$relative_path"
+  [[ -e "$candidate" ]] || abort_launcher "$label is unavailable"
+  resolved_candidate="$(/bin/realpath "$candidate" 2>/dev/null)" || abort_launcher "$label cannot be resolved"
+  [[ "$resolved_candidate" == "$resolved_mount"/* ]] || abort_launcher "$label escapes its mounted volume"
+  print -r -- "$resolved_candidate"
+}
+
+resolve_runtime_file() {
+  local label="$1"
+  local relative_path="$2"
+  local candidate resolved_candidate
+  validate_relative_path "$relative_path" || abort_launcher "$label has an unsafe catalog path"
+  candidate="$ENGINE/$relative_path"
+  [[ -f "$candidate" ]] || abort_launcher "$label is missing"
+  resolved_candidate="$(/bin/realpath "$candidate" 2>/dev/null)" || abort_launcher "$label cannot be resolved"
+  [[ "$resolved_candidate" == "$ENGINE"/* ]] || abort_launcher "$label escapes the selected runtime"
+  print -r -- "$resolved_candidate"
+}
+
+verify_catalog_file() {
+  local logical_name="$1"
+  local relative_path expected_hash actual_hash
+  relative_path="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.verificationFiles.$logical_name.relativePath" || true)"
+  [[ -n "$relative_path" ]] || return 0
+  expected_hash="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.verificationFiles.$logical_name.sha256" || true)"
+  [[ ${#expected_hash} -eq 64 && "$expected_hash" != *[!0-9A-Fa-f]* ]] || abort_launcher "$logical_name has an invalid catalog hash"
+  local verified_file
+  verified_file="$(resolve_runtime_file "$logical_name" "$relative_path")" || return 1
+  actual_hash="$(/usr/bin/shasum -a 256 "$verified_file" | /usr/bin/awk '{print $1}')"
+  [[ "${actual_hash:l}" == "${expected_hash:l}" ]] || abort_launcher "$logical_name integrity check failed"
+}
+
+# APFS exposes the startup Data volume both as `/Users/...` and as
+# `/System/Volumes/Data/Users/...`. `realpath` deliberately preserves that
+# alias distinction, so string equality can reject two paths that name the
+# same directory. Require the managed object to remain a symlink, then compare
+# the resolved filesystem object by device/inode instead.
+game_root_binding_is_valid() {
+  local game_dir="$1"
+  local managed_link="$2"
+  [[ -d "$game_dir" && -L "$managed_link" ]] || return 1
+  /bin/test "$managed_link" -ef "$game_dir"
+}
+
+[[ -r "$CATALOG_FILE" ]] || abort_launcher "the bundled runtime catalog is missing"
+[[ "$(plist_raw "$CATALOG_FILE" schemaVersion || true)" == "1" ]] || abort_launcher "unsupported runtime catalog schema"
+if [[ "$PRODUCT" == "global" ]]; then
+  [[ -r "$RUNTIME_BINDING_FILE" ]] || abort_launcher "runtime-binding.json is missing; install a game first"
+  [[ "$(plist_raw "$RUNTIME_BINDING_FILE" schemaVersion || true)" == "1" ]] || abort_launcher "unsupported runtime binding schema"
+  SELECTED_ENGINE_ID="$(plist_raw "$RUNTIME_BINDING_FILE" selectedEngineId || true)"
+  ENGINE_VOLUME_UUID="$(plist_raw "$RUNTIME_BINDING_FILE" runtime.volumeUUID || true)"
+  ENGINE_RELATIVE_PATH="$(plist_raw "$RUNTIME_BINDING_FILE" runtime.relativePath || true)"
+else
+  [[ -r "$INSTALLATION_FILE" ]] || abort_launcher "installation.json is missing; install the mainland client first"
+  [[ "$(plist_raw "$INSTALLATION_FILE" schemaVersion || true)" == "1" ]] || abort_launcher "unsupported installation schema"
+  SELECTED_ENGINE_ID="$(plist_raw "$INSTALLATION_FILE" selectedEngineId || true)"
+  ENGINE_VOLUME_UUID="$(plist_raw "$INSTALLATION_FILE" "engines.$SELECTED_ENGINE_ID.runtime.volumeUUID" || true)"
+  ENGINE_RELATIVE_PATH="$(plist_raw "$INSTALLATION_FILE" "engines.$SELECTED_ENGINE_ID.runtime.relativePath" || true)"
+fi
+[[ -n "$SELECTED_ENGINE_ID" && "$SELECTED_ENGINE_ID" != *[!A-Za-z0-9_-]* ]] || abort_launcher "selectedEngineId is invalid"
+LAUNCH_PROFILE="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.launchProfile" || true)"
+case "$LAUNCH_PROFILE" in
+  codeweavers-wine-release-dxmt|sikarugir-wswine-dxmt) ;;
+  '') abort_launcher "selected engine is not present in the bundled catalog" ;;
+  *) abort_launcher "selected engine uses an unsupported launch profile" ;;
+esac
+CORE_AUDIO_CAPTURE_POLICY="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.capabilities.coreAudioCapturePolicy" || true)"
+case "$CORE_AUDIO_CAPTURE_POLICY" in
+  rebinder-filter-required) DEFAULT_AUDIO_INTERPOSER_STAGE="rebinder-filter" ;;
+  runtime-default-input-only|unmanaged) DEFAULT_AUDIO_INTERPOSER_STAGE="off" ;;
+  '') abort_launcher "selected engine lacks a CoreAudio capture policy" ;;
+  *) abort_launcher "selected engine uses an unsupported CoreAudio capture policy" ;;
+esac
+D3DCOMPILER47_POLICY="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.capabilities.d3dcompiler47Policy" || true)"
+case "$D3DCOMPILER47_POLICY" in
+  verified-game-native-dynamic-only|verified-game-native-when-manifest-present|'') ;;
+  *) abort_launcher "selected engine uses an unsupported D3DCompiler policy" ;;
+esac
+
+if [[ "$PRODUCT" == "global" ]]; then
+  [[ -r "$PRODUCTS_FILE" ]] || abort_launcher "products.json is missing; install the global client first"
+  [[ "$(plist_raw "$PRODUCTS_FILE" schemaVersion || true)" == "1" ]] || abort_launcher "unsupported products schema"
+  PREFIX_VOLUME_UUID="$(plist_raw "$PRODUCTS_FILE" "installations.global.prefix.volumeUUID" || true)"
+  PREFIX_RELATIVE_PATH="$(plist_raw "$PRODUCTS_FILE" "installations.global.prefix.relativePath" || true)"
+  GAME_VOLUME_UUID="$(plist_raw "$PRODUCTS_FILE" "installations.global.gameRoot.volumeUUID" || true)"
+  GAME_RELATIVE_PATH="$(plist_raw "$PRODUCTS_FILE" "installations.global.gameRoot.relativePath" || true)"
+  WINDOWS_GAME_ROOT="IdentityVGlobal"
+  GAME_LAUNCH_ARGUMENTS=()
+else
+  PREFIX_VOLUME_UUID="$(plist_raw "$INSTALLATION_FILE" "engines.$SELECTED_ENGINE_ID.prefix.volumeUUID" || true)"
+  PREFIX_RELATIVE_PATH="$(plist_raw "$INSTALLATION_FILE" "engines.$SELECTED_ENGINE_ID.prefix.relativePath" || true)"
+  GAME_VOLUME_UUID="$(plist_raw "$INSTALLATION_FILE" "engines.$SELECTED_ENGINE_ID.gameRoot.volumeUUID" || true)"
+  GAME_RELATIVE_PATH="$(plist_raw "$INSTALLATION_FILE" "engines.$SELECTED_ENGINE_ID.gameRoot.relativePath" || true)"
+  WINDOWS_GAME_ROOT="IdentityV"
+  GAME_LAUNCH_ARGUMENTS=(--start_from_launcher=1 --is_multi_start)
+fi
+typeset -a GAME_LAUNCH_ARGUMENTS
+
+ENGINE="$(resolve_volume_item "runtime" "$ENGINE_VOLUME_UUID" "$ENGINE_RELATIVE_PATH")" || exit 1
+PREFIX="$(resolve_volume_item "prefix" "$PREFIX_VOLUME_UUID" "$PREFIX_RELATIVE_PATH")" || exit 1
+GAME_DIR="$(resolve_volume_item "game root" "$GAME_VOLUME_UUID" "$GAME_RELATIVE_PATH")" || exit 1
+
+WINE_RELATIVE_PATH="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.executablePaths.wine" || true)"
+WINESERVER_RELATIVE_PATH="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.executablePaths.wineserver" || true)"
+WINE_BIN="$(resolve_runtime_file "wine" "$WINE_RELATIVE_PATH")" || exit 1
+WINESERVER_BIN="$(resolve_runtime_file "wineserver" "$WINESERVER_RELATIVE_PATH")" || exit 1
+[[ -x "$WINE_BIN" && -x "$WINESERVER_BIN" ]] || abort_launcher "selected engine executables are not runnable"
+
+for verification_name in wine wineserver dxmt moltenVK winemac gmp pcre2 zstd gdi32; do
+  verify_catalog_file "$verification_name" || exit 1
+done
+
+actual_game_root="$(/bin/realpath "$GAME_DIR" 2>/dev/null || true)"
+managed_game_link="$PREFIX/drive_c/Games/$WINDOWS_GAME_ROOT"
+[[ -n "$actual_game_root" ]] || abort_launcher "the configured game root cannot be resolved"
+game_root_binding_is_valid "$GAME_DIR" "$managed_game_link" || abort_launcher "the selected prefix is not bound to the configured game root"
+[[ -f "$GAME_DIR/dwrg.exe" ]] || abort_launcher "dwrg.exe is unavailable"
+[[ -f "$COMMAND_GRAVE_FORWARDER" ]] || abort_launcher "Command shortcut forwarder is unavailable"
+[[ -f "$LOGIN_DNS_COMPAT" ]] || abort_launcher "IDV Login DNS compatibility layer is unavailable"
+
+CONFIG_FILE="$CONFIG_DIR/launcher.env"
+MAINTENANCE_DIR="$CONFIG_DIR/Maintenance"
+METAL_HUD_CONFIG_FILE="$MAINTENANCE_DIR/metal-hud.env"
+INPUT_TRACE_ONCE_MARKER="$CONFIG_DIR/.developer-input-trace-once"
+DISPLAY_SIGNATURE_FILE="$CONFIG_DIR/display-signature-${PRODUCT}.sha256"
+# One physical pointing device cannot safely have two independent restoration
+# owners.  Keep acceleration automation with the established mainland runner;
+# global launch leaves the system setting untouched.
+MOUSE_ACCELERATION_STATE_FILE="$CONFIG_DIR/mouse-acceleration-${PRODUCT}.session.json"
+MOUSE_ACCELERATION_CONTROLLER="$APP_CONTENTS/Resources/IdentityVMouseAccelerationController"
+FUNCTION_KEY_CONTROLLER="$APP_CONTENTS/Resources/IdentityVFunctionKeyController"
+# HIDFKeyMode is shared by both servers and all Apple keyboards. One locked
+# journal coordinates owners; never give each product its own restoration file.
+FUNCTION_KEY_STATE_FILE="$CONFIG_DIR/function-keys.session.json"
+FUNCTION_KEY_WATCH_PID=""
+
+load_launcher_settings() {
+  local raw_line key value
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    case "$raw_line" in
+      ''|'#'*) continue ;;
+      *=*) ;;
+      *) continue ;;
+    esac
+    key="${raw_line%%=*}"
+    value="${raw_line#*=}"
+    case "$key" in
+      IDENTITYV_USE_VIRTUAL_DESKTOP) IDENTITYV_USE_VIRTUAL_DESKTOP="$value" ;;
+      IDENTITYV_DESKTOP_NAME) IDENTITYV_DESKTOP_NAME="$value" ;;
+      IDENTITYV_DESKTOP_SIZE) IDENTITYV_DESKTOP_SIZE="$value" ;;
+      IDENTITYV_AUTO_RESTART_ON_UPDATE) IDENTITYV_AUTO_RESTART_ON_UPDATE="$value" ;;
+      IDENTITYV_RESTART_LIMIT) IDENTITYV_RESTART_LIMIT="$value" ;;
+      IDENTITYV_FORCE_GAME_MODE) IDENTITYV_FORCE_GAME_MODE="$value" ;;
+      IDENTITYV_DISABLE_MOUSE_ACCELERATION) IDENTITYV_DISABLE_MOUSE_ACCELERATION="$value" ;;
+      IDENTITYV_STANDARD_FUNCTION_KEYS) IDENTITYV_STANDARD_FUNCTION_KEYS="$value" ;;
+      IDENTITYV_MOUSE_VENDOR_ID) IDENTITYV_MOUSE_VENDOR_ID="$value" ;;
+      IDENTITYV_MOUSE_PRODUCT_ID) IDENTITYV_MOUSE_PRODUCT_ID="$value" ;;
+      IDENTITYV_AUDIO_INTERPOSER_STAGE) IDENTITYV_AUDIO_INTERPOSER_STAGE="$value" ;;
+      IDENTITYV_DEFAULT_INPUT_ONLY) IDENTITYV_DEFAULT_INPUT_ONLY="$value" ;;
+    esac
+  done < "$CONFIG_FILE"
+}
+
+if [[ -r "$CONFIG_FILE" ]]; then
+  /bin/chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+  load_launcher_settings
+fi
+
+IDENTITYV_USE_VIRTUAL_DESKTOP="${IDENTITYV_USE_VIRTUAL_DESKTOP:-0}"
+IDENTITYV_DESKTOP_NAME="${IDENTITYV_DESKTOP_NAME:-IdentityV}"
+IDENTITYV_DESKTOP_SIZE="${IDENTITYV_DESKTOP_SIZE:-1920x1080}"
+IDENTITYV_AUTO_RESTART_ON_UPDATE="${IDENTITYV_AUTO_RESTART_ON_UPDATE:-0}"
+IDENTITYV_RESTART_LIMIT="${IDENTITYV_RESTART_LIMIT:-2}"
+IDENTITYV_FORCE_GAME_MODE="${IDENTITYV_FORCE_GAME_MODE:-1}"
+IDENTITYV_DISABLE_MOUSE_ACCELERATION="${IDENTITYV_DISABLE_MOUSE_ACCELERATION:-0}"
+IDENTITYV_STANDARD_FUNCTION_KEYS="${IDENTITYV_STANDARD_FUNCTION_KEYS:-1}"
+IDENTITYV_MOUSE_VENDOR_ID="${IDENTITYV_MOUSE_VENDOR_ID:-}"
+IDENTITYV_MOUSE_PRODUCT_ID="${IDENTITYV_MOUSE_PRODUCT_ID:-}"
+IDENTITYV_AUDIO_INTERPOSER_STAGE="${IDENTITYV_AUDIO_INTERPOSER_STAGE:-$DEFAULT_AUDIO_INTERPOSER_STAGE}"
+IDENTITYV_DEFAULT_INPUT_ONLY="${IDENTITYV_DEFAULT_INPUT_ONLY:-0}"
+LAUNCHED_WINE_PID=""
+RUN_SESSION_FILE="$CONFIG_DIR/.launcher-session-${PRODUCT}.env"
+REGISTRY_CONTRACT_VERSION="alpha1-registry-v3"
+REGISTRY_CONTRACT_MARKER="$PREFIX/.identityv-launch-registry-contract"
+
+clear_run_session() {
+  [[ -f "$RUN_SESSION_FILE" && ! -L "$RUN_SESSION_FILE" ]] || return 0
+  local owner
+  owner="$(/usr/bin/awk -F= '$1 == "runner_pid" { print $2; exit }' "$RUN_SESSION_FILE" 2>/dev/null || true)"
+  [[ "$owner" == "$$" ]] && /bin/rm -f "$RUN_SESSION_FILE"
+}
+LAUNCHER_CLEANUP_DONE=0
+if [[ "$IDENTITYV_DESKTOP_SIZE" != <->x<-> ]]; then
+  IDENTITYV_USE_VIRTUAL_DESKTOP=0
+fi
+if [[ "$IDENTITYV_RESTART_LIMIT" != <-> ]]; then
+  IDENTITYV_RESTART_LIMIT=2
+fi
+case "${IDENTITYV_FORCE_GAME_MODE:l}" in
+  1|yes|true|on) IDENTITYV_FORCE_GAME_MODE=1 ;;
+  *) IDENTITYV_FORCE_GAME_MODE=0 ;;
+esac
+case "${IDENTITYV_DISABLE_MOUSE_ACCELERATION:l}" in
+  1|yes|true|on) IDENTITYV_DISABLE_MOUSE_ACCELERATION=1 ;;
+  *) IDENTITYV_DISABLE_MOUSE_ACCELERATION=0 ;;
+esac
+case "$CORE_AUDIO_CAPTURE_POLICY" in
+  rebinder-filter-required)
+    IDENTITYV_AUDIO_INTERPOSER_STAGE="rebinder-filter"
+    ;;
+  runtime-default-input-only)
+    IDENTITYV_AUDIO_INTERPOSER_STAGE="off"
+    ;;
+  unmanaged)
+    if [[ "$IDENTITYV_DEFAULT_INPUT_ONLY" == "1" && "$IDENTITYV_AUDIO_INTERPOSER_STAGE" == "off" ]]; then
+      IDENTITYV_AUDIO_INTERPOSER_STAGE=filter
+    fi
+    ;;
+esac
+case "$IDENTITYV_AUDIO_INTERPOSER_STAGE" in
+  off|load-only|passthrough|passthrough-handle|rebinder|rebinder-filter|rebinder-default-alias|caller|filter) ;;
+  *) abort_launcher "IDENTITYV_AUDIO_INTERPOSER_STAGE must be off, load-only, passthrough, passthrough-handle, rebinder, rebinder-filter, rebinder-default-alias, caller, or filter" ;;
+esac
+AUDIO_INTERPOSER=""
+if [[ "$IDENTITYV_AUDIO_INTERPOSER_STAGE" != off ]]; then
+  AUDIO_INTERPOSER="$AUDIO_INTERPOSER_RESOURCE_DIR/IdentityVCoreAudio-${IDENTITYV_AUDIO_INTERPOSER_STAGE}.dylib"
+  [[ -f "$AUDIO_INTERPOSER" ]] || abort_launcher "selected CoreAudio interposer stage is unavailable"
+fi
+
+STAMP="$(date '+%Y%m%d-%H%M%S')"
+LOG_FILE="$LOG_DIR/identityv-mac-dxmt-$STAMP.log"
+GAMEPOLICYCTL="/Applications/Xcode.app/Contents/Developer/usr/bin/gamepolicyctl"
+LOW_FREQUENCY_SAMPLE_INTERVAL_SECONDS=10
+LOW_FREQUENCY_LAST_SAMPLE_EPOCH=0
+STALL_LOW_CPU_SAMPLES=0
+METAL_HUD_ENABLED=0
+METAL_HUD_CONFIG_REASON="configuration is absent"
+
+metal_hud_file_is_safe() {
+  local owner mode
+  [[ -d "$CONFIG_DIR" && ! -L "$CONFIG_DIR" && -d "$MAINTENANCE_DIR" && ! -L "$MAINTENANCE_DIR" ]] || return 1
+  owner="$(/usr/bin/stat -f '%u' "$CONFIG_DIR" 2>/dev/null || true)"
+  mode="$(/usr/bin/stat -f '%Lp' "$CONFIG_DIR" 2>/dev/null || true)"
+  [[ "$owner" == "$(id -u)" && "$mode" == <-> ]] || return 1
+  (( (8#$mode & 8#077) == 0 && (8#$mode & 8#700) == 8#700 )) || return 1
+  [[ "$mode" == 700 ]] || return 1
+  owner="$(/usr/bin/stat -f '%u' "$MAINTENANCE_DIR" 2>/dev/null || true)"
+  mode="$(/usr/bin/stat -f '%Lp' "$MAINTENANCE_DIR" 2>/dev/null || true)"
+  [[ "$owner" == "$(id -u)" && "$mode" == <-> ]] || return 1
+  (( (8#$mode & 8#077) == 0 && (8#$mode & 8#700) == 8#700 )) || return 1
+  [[ "$mode" == 700 ]] || return 1
+  [[ -f "$METAL_HUD_CONFIG_FILE" && ! -L "$METAL_HUD_CONFIG_FILE" ]] || return 1
+  owner="$(/usr/bin/stat -f '%u' "$METAL_HUD_CONFIG_FILE" 2>/dev/null || true)"
+  mode="$(/usr/bin/stat -f '%Lp' "$METAL_HUD_CONFIG_FILE" 2>/dev/null || true)"
+  [[ "$owner" == "$(id -u)" && "$mode" == <-> ]] || return 1
+  (( (8#$mode & 8#077) == 0 )) || return 1
+  case "$mode" in
+    400|600) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+load_metal_hud_configuration() {
+  local raw_line schema_count=0 enabled_count=0 enabled_value="" invalid=0
+  METAL_HUD_ENABLED=0
+  if [[ ! -e "$METAL_HUD_CONFIG_FILE" && ! -L "$METAL_HUD_CONFIG_FILE" ]]; then
+    METAL_HUD_CONFIG_REASON="configuration is absent"
+    return 0
+  fi
+  if ! metal_hud_file_is_safe; then
+    METAL_HUD_CONFIG_REASON="configuration failed ownership, type or permission checks"
+    return 0
+  fi
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    [[ "$raw_line" != *$'\r'* && "$raw_line" != *$'\n'* ]] || { invalid=1; break; }
+    case "$raw_line" in
+      schema=1) schema_count=$((schema_count + 1)) ;;
+      enabled=0|enabled=1) enabled_count=$((enabled_count + 1)); enabled_value="${raw_line#enabled=}" ;;
+      *) invalid=1; break ;;
+    esac
+  done < "$METAL_HUD_CONFIG_FILE"
+  if (( invalid || schema_count != 1 || enabled_count != 1 )); then
+    METAL_HUD_CONFIG_REASON="configuration schema is invalid"
+    return 0
+  fi
+  METAL_HUD_ENABLED="$enabled_value"
+  METAL_HUD_CONFIG_REASON="configuration accepted"
+}
+
+load_metal_hud_configuration
+print -r -- "Metal HUD: $METAL_HUD_CONFIG_REASON; enabled=$METAL_HUD_ENABLED" >>"$LOG_FILE"
+
+# --- forensic freeze evidence -------------------------------------------------
+# Added 2026-09-18 after the 2026-09-16/17 freezes left no thread evidence: the
+# session had no capture running and the launcher's hang alert only prompts.
+# Passive and self-stopping: it snapshots only when the managed dwrg.exe is the
+# frontmost application AND its CPU has stayed far below anything a rendering
+# game uses, or when the game itself writes a new ANR marker.  It never records
+# input, screens, chat or audio.
+STALL_LOW_CPU_PERCENT=5
+STALL_SAMPLES=3
+STALL_COOLDOWN_SECONDS=600
+STALL_CPU_MONITORING=1
+STALL_LAST_SNAPSHOT_EPOCH=0
+STALL_LOW_CPU_SAMPLES=0
+STALL_LOG_DEVICE=""
+STALL_LOG_INODE=""
+STALL_LOG_OFFSET=0
+# Keep only hashes, never the private log lines themselves, for process-lifetime
+# de-duplication across appends, truncation and rotation.
+typeset -A STALL_ANR_SEEN=()
+STALL_SNAPSHOT_ACTIVE=0
+STALL_SAMPLE_PID=""
+STALL_SAMPLE_WORKER_PID=""
+STALL_SAMPLE_WORKER_DIR=""
+STALL_SAMPLE_PID_FILE=""
+STALL_SAMPLE_EXIT_CODE=0
+STALL_SAMPLE_TIMED_OUT=0
+STALL_SAMPLE_ELAPSED_SECONDS=0
+STALL_SNAPSHOT_SEQUENCE=0
+STALL_MAX_SNAPSHOTS=4
+STALL_SNAPSHOT_MARKER=".runner-stall-v2"
+# sample output and its diagnostic stderr are each bounded by this file limit.
+# Four marker-owned snapshots therefore stay within roughly 2 MiB of stack
+# output across runner restarts; legacy unmarked evidence is never deleted here.
+STALL_SAMPLE_MAX_BYTES=262144
+STALL_SAMPLE_TIMEOUT_SECONDS=3
+STALL_PS_BIN="/bin/ps"
+STALL_LSAPPINFO_BIN="/usr/bin/lsappinfo"
+STALL_STAT_BIN="/usr/bin/stat"
+STALL_TAIL_BIN="/usr/bin/tail"
+STALL_SHASUM_BIN="/usr/bin/shasum"
+STALL_SAMPLE_BIN="/usr/bin/sample"
+
+stall_log_metadata() {
+  [[ -f "$GAME_DIR/log.txt" ]] || return 1
+  "$STALL_STAT_BIN" -f '%d:%i:%z' "$GAME_DIR/log.txt" 2>/dev/null
+}
+
+stall_anr_key() {
+  print -rn -- "$1" | "$STALL_SHASUM_BIN" -a 256 2>/dev/null | /usr/bin/awk '{print $1}'
+}
+
+stall_remember_anr() {
+  local key="$1"
+  [[ -n "$key" ]] || return 1
+  [[ -n "${STALL_ANR_SEEN[$key]:-}" ]] && return 1
+  STALL_ANR_SEEN[$key]=1
+  return 0
+}
+
+stall_seed_anr_markers() {
+  local line key
+  [[ -f "$GAME_DIR/log.txt" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == *"OCCUR ANR"* ]] || continue
+    key="$(stall_anr_key "$line")"
+    stall_remember_anr "$key" || true
+  done <"$GAME_DIR/log.txt"
+}
+
+stall_front_pid_is() {
+  local target="$1" asn info
+  asn="$("$STALL_LSAPPINFO_BIN" front 2>/dev/null || true)"
+  [[ "$asn" == ASN:* ]] || return 1
+  info="$("$STALL_LSAPPINFO_BIN" info "$asn" 2>/dev/null || true)"
+  print -r -- "$info" | /usr/bin/awk -v target="$target" '
+    /^[[:space:]]*pid = [0-9]+/ { if ($3 == target) found=1 }
+    END { exit !found }
+  '
+}
+
+stall_expected_process_command() {
+  print -r -- "C:/Games/$WINDOWS_GAME_ROOT/dwrg.exe"
+}
+
+stall_process_command() {
+  local pid="$1" uid expected
+  uid="$(/usr/bin/id -u)"
+  expected="$(stall_expected_process_command)"
+  "$STALL_PS_BIN" -p "$pid" -o pid=,uid=,command= 2>/dev/null | /usr/bin/awk \
+    -v target="$pid" -v uid="$uid" -v expected="$expected" '
+    {
+      command=""
+      for (i=3; i<=NF; i++) command = command (i == 3 ? "" : " ") $i
+      gsub(/\\/, "/", command)
+    }
+    $1 == target && $2 == uid && index(command, expected) == 1 && \
+      (length(command) == length(expected) || substr(command, length(expected) + 1, 1) == " ") {
+      print command
+      exit
+    }
+  '
+}
+
+sample_stall_cpu() {
+  local pid="$1" uid expected
+  [[ "$pid" == <-> ]] || return 1
+  uid="$(/usr/bin/id -u)"
+  expected="$(stall_expected_process_command)"
+  "$STALL_PS_BIN" -p "$pid" -o pid=,uid=,%cpu=,command= 2>/dev/null | /usr/bin/awk \
+    -v target="$pid" -v uid="$uid" -v expected="$expected" '
+    {
+      command=$4
+      gsub(/\\/, "/", command)
+    }
+    $1 == target && $2 == uid && index(command, expected) == 1 && \
+      (length(command) == length(expected) || substr(command, length(expected) + 1, 1) == " ") {
+      print $3
+      exit
+    }
+  '
+}
+
+initialize_stall_watch() {
+  local metadata device rest inode size
+  STALL_LOW_CPU_SAMPLES=0
+  STALL_LOG_DEVICE=""
+  STALL_LOG_INODE=""
+  STALL_LOG_OFFSET=0
+  metadata="$(stall_log_metadata || true)"
+  [[ "$metadata" == *:*:* ]] || return 0
+  device="${metadata%%:*}"
+  rest="${metadata#*:}"
+  inode="${rest%%:*}"
+  size="${rest##*:}"
+  [[ "$device" == <-> && "$inode" == <-> && "$size" == <-> ]] || return 0
+  # Seed only the baseline.  It makes a later rotation/truncation of the same
+  # old marker harmless while the cursor starts at the pre-launch EOF.
+  stall_seed_anr_markers
+  STALL_LOG_DEVICE="$device"
+  STALL_LOG_INODE="$inode"
+  STALL_LOG_OFFSET="$size"
+}
+
+stall_snapshot_cooldown_elapsed() {
+  local now
+  now="$(/bin/date +%s)"
+  (( STALL_LAST_SNAPSHOT_EPOCH == 0 || now - STALL_LAST_SNAPSHOT_EPOCH >= STALL_COOLDOWN_SECONDS ))
+}
+
+stall_snapshot_worker_cleanup() {
+  local child="$STALL_SAMPLE_PID"
+  if [[ "$child" == <-> ]]; then
+    /bin/kill -TERM "$child" >/dev/null 2>&1 || true
+    /bin/sleep 0.2
+    /bin/kill -KILL "$child" >/dev/null 2>&1 || true
+  fi
+  [[ -z "$STALL_SAMPLE_PID_FILE" ]] || : >"$STALL_SAMPLE_PID_FILE"
+  STALL_SAMPLE_PID=""
+}
+
+run_stall_sample() {
+  local pid="$1" output="$2" error="$3" pid_file="${4:-}" blocks started now
+  STALL_SAMPLE_TIMED_OUT=0
+  blocks=$(( (STALL_SAMPLE_MAX_BYTES + 511) / 512 ))
+  # exec makes the tracked PID the sample process itself.  ulimit bounds both
+  # redirected files; the polling deadline bounds a hung sample invocation.
+  /bin/zsh -c 'limit="$1"; shift; ulimit -f "$limit" 2>/dev/null || exit 65; exec "$@"' \
+    zsh "$blocks" "$STALL_SAMPLE_BIN" "$pid" 1 100 -mayDie -file /dev/fd/1 >"$output" 2>"$error" &
+  STALL_SAMPLE_PID=$!
+  [[ -z "$pid_file" ]] || print -r -- "$STALL_SAMPLE_PID" >"$pid_file"
+  started="$(/bin/date +%s)"
+  while /bin/kill -0 "$STALL_SAMPLE_PID" >/dev/null 2>&1; do
+    now="$(/bin/date +%s)"
+    if (( now - started >= STALL_SAMPLE_TIMEOUT_SECONDS )); then
+      STALL_SAMPLE_TIMED_OUT=1
+      /bin/kill -TERM "$STALL_SAMPLE_PID" >/dev/null 2>&1 || true
+      /bin/sleep 0.2
+      /bin/kill -KILL "$STALL_SAMPLE_PID" >/dev/null 2>&1 || true
+      break
+    fi
+    /bin/sleep 0.1
+  done
+  if wait "$STALL_SAMPLE_PID" >/dev/null 2>&1; then
+    STALL_SAMPLE_EXIT_CODE=0
+  else
+    STALL_SAMPLE_EXIT_CODE=$?
+  fi
+  now="$(/bin/date +%s)"
+  STALL_SAMPLE_ELAPSED_SECONDS=$((now - started))
+  [[ -z "$pid_file" ]] || : >"$pid_file"
+  STALL_SAMPLE_PID=""
+}
+
+prune_stall_snapshots() {
+  local marker old
+  local -a owned_dirs=()
+  # Marker ownership lets retention span runner restarts without deleting
+  # older diagnostic directories produced by a previous implementation.
+  for marker in "$CONFIG_DIR"/Diagnostics/stalls/*/.runner-stall-v2(N); do
+    [[ -L "${marker:h}" ]] && continue
+    owned_dirs+=("${marker:h}")
+  done
+  owned_dirs=("${(@on)owned_dirs}")
+  while (( ${#owned_dirs} > STALL_MAX_SNAPSHOTS )); do
+    old="${owned_dirs[1]}"
+    /bin/rm -rf -- "$old" 2>/dev/null || true
+    owned_dirs=("${(@)owned_dirs[2,-1]}")
+  done
+}
+
+stall_reap_snapshot_worker() {
+  local state
+  [[ "$STALL_SAMPLE_WORKER_PID" == <-> ]] || return 0
+  if /bin/kill -0 "$STALL_SAMPLE_WORKER_PID" >/dev/null 2>&1; then
+    state="$(/bin/ps -p "$STALL_SAMPLE_WORKER_PID" -o state= 2>/dev/null | /usr/bin/tr -d ' ' || true)"
+    [[ "$state" == Z* ]] || return 1
+  fi
+  wait "$STALL_SAMPLE_WORKER_PID" >/dev/null 2>&1 || true
+  STALL_SAMPLE_WORKER_PID=""
+  STALL_SAMPLE_WORKER_DIR=""
+  STALL_SNAPSHOT_ACTIVE=0
+  return 0
+}
+
+run_stall_snapshot_worker() {
+  local pid="$1" dir="$2"
+  STALL_SAMPLE_PID_FILE="$dir/.sample.pid"
+  trap 'stall_snapshot_worker_cleanup; exit 143' TERM INT HUP
+  run_stall_sample "$pid" "$dir/sample.txt" "$dir/sample.log" "$STALL_SAMPLE_PID_FILE"
+  {
+    print "ts=$(/bin/date +%s)"
+    print "sample_exit_code=$STALL_SAMPLE_EXIT_CODE"
+    print "sample_timed_out=$STALL_SAMPLE_TIMED_OUT"
+    print "sample_elapsed_seconds=$STALL_SAMPLE_ELAPSED_SECONDS"
+    print "memory_pressure=$(/usr/bin/memory_pressure -Q 2>/dev/null | /usr/bin/tr -d '\n' || true)"
+    /usr/bin/vm_stat 2>/dev/null | /usr/bin/grep -E 'Pages free|Pages active|Pages wired|Pages occupied by compressor|Swapins|Swapouts' || true
+    /usr/bin/sysctl -n vm.swapusage 2>/dev/null || true
+  } >>"$dir/context.txt" 2>/dev/null || true
+  : >"$STALL_SAMPLE_PID_FILE"
+}
+
+collect_stall_snapshot() {
+  local reason="$1" pid="$2" stamp dir cpu command_path now
+  stall_reap_snapshot_worker || return 0
+  [[ -z "$STALL_SAMPLE_WORKER_PID" ]] || return 0
+  stall_snapshot_cooldown_elapsed || return 0
+  STALL_SNAPSHOT_SEQUENCE=$((STALL_SNAPSHOT_SEQUENCE + 1))
+  stamp="$(/bin/date '+%Y%m%d-%H%M%S')"
+  dir="$CONFIG_DIR/Diagnostics/stalls/$stamp-$reason-$$-$STALL_SNAPSHOT_SEQUENCE"
+  if ! /bin/mkdir -p "$dir"; then
+    STALL_SNAPSHOT_ACTIVE=0
+    return 0
+  fi
+  /bin/chmod 700 "$dir" 2>/dev/null || true
+  : >"$dir/$STALL_SNAPSHOT_MARKER" 2>/dev/null || true
+  cpu="$(sample_stall_cpu "$pid" || true)"
+  command_path="$(stall_process_command "$pid" || true)"
+  {
+    print "time=$(/bin/date '+%Y-%m-%dT%H:%M:%S%z')"
+    print "reason=$reason"
+    print "product=$PRODUCT"
+    print "game_pid=$pid"
+    print "cpu_pct=${cpu:-unknown}"
+    print "path=$command_path"
+  } >"$dir/context.txt" 2>/dev/null || true
+  # The worker keeps the monitor loop responsive; it owns the bounded sample
+  # and system counters and is reclaimed by cleanup_stall_watch on exit.
+  prune_stall_snapshots
+  now="$(/bin/date +%s)"
+  STALL_LAST_SNAPSHOT_EPOCH="$now"
+  print -r -- "stall snapshot: $dir (reason=$reason cpu_pct=${cpu:-unknown})" >>"$LOG_FILE"
+  /bin/ln -sfn "$dir" "$CONFIG_DIR/Diagnostics/stalls/latest" 2>/dev/null || true
+  STALL_SNAPSHOT_ACTIVE=1
+  run_stall_snapshot_worker "$pid" "$dir" >>"$LOG_FILE" 2>&1 &
+  STALL_SAMPLE_WORKER_PID=$!
+  STALL_SAMPLE_WORKER_DIR="$dir"
+}
+
+stall_handle_anr_line() {
+  local pid="$1" line="$2" key
+  key="$(stall_anr_key "$line")"
+  stall_remember_anr "$key" || return 0
+  print -r -- "game reported new OCCUR ANR at $(/bin/date '+%Y-%m-%d %H:%M:%S')" >>"$LOG_FILE"
+  collect_stall_snapshot "game-anr" "$pid"
+}
+
+stall_scan_new_anr() {
+  local pid="$1" metadata device rest inode size start scan_count consumed line
+  local LC_ALL=C
+  metadata="$(stall_log_metadata || true)"
+  [[ "$metadata" == *:*:* ]] || {
+    STALL_LOG_DEVICE=""
+    STALL_LOG_INODE=""
+    STALL_LOG_OFFSET=0
+    return 0
+  }
+  device="${metadata%%:*}"
+  rest="${metadata#*:}"
+  inode="${rest%%:*}"
+  size="${rest##*:}"
+  [[ "$device" == <-> && "$inode" == <-> && "$size" == <-> ]] || return 0
+  consumed=0
+  if [[ "$device" != "$STALL_LOG_DEVICE" || "$inode" != "$STALL_LOG_INODE" || "$size" -lt "$STALL_LOG_OFFSET" ]]; then
+    print -r -- "game log rotated or truncated; resetting ANR cursor" >>"$LOG_FILE"
+    STALL_LOG_OFFSET=0
+  fi
+  if (( size > STALL_LOG_OFFSET )); then
+    start=$((STALL_LOG_OFFSET + 1))
+    scan_count=$((size - STALL_LOG_OFFSET))
+    # Limit the stream to the stat snapshot.  A writer may append concurrently;
+    # an unterminated final read is deliberately left at the old cursor so the
+    # next pass can join it with the rest of the line.
+    while IFS= read -r line; do
+      consumed=$((consumed + ${#line} + 1))
+      [[ "$line" == *"OCCUR ANR"* ]] || continue
+      stall_handle_anr_line "$pid" "$line"
+    done < <("$STALL_TAIL_BIN" -c "+$start" "$GAME_DIR/log.txt" 2>/dev/null | /usr/bin/head -c "$scan_count")
+  fi
+  STALL_LOG_DEVICE="$device"
+  STALL_LOG_INODE="$inode"
+  STALL_LOG_OFFSET=$((STALL_LOG_OFFSET + consumed))
+}
+
+stall_pid_is_foreground_game() {
+  stall_front_pid_is "$1"
+}
+
+update_stall_watch() {
+  local pid="$1" now cpu
+  stall_scan_new_anr "$pid"
+  (( STALL_CPU_MONITORING == 1 )) || return 0
+  if ! stall_pid_is_foreground_game "$pid"; then
+    STALL_LOW_CPU_SAMPLES=0
+    return 0
+  fi
+  cpu="$(sample_stall_cpu "$pid" || true)"
+  [[ -n "$cpu" ]] || { STALL_LOW_CPU_SAMPLES=0; return 0; }
+  if /usr/bin/awk -v c="$cpu" -v limit="$STALL_LOW_CPU_PERCENT" 'BEGIN { exit !(c + 0 < limit + 0) }'; then
+    STALL_LOW_CPU_SAMPLES=$(( STALL_LOW_CPU_SAMPLES + 1 ))
+  else
+    STALL_LOW_CPU_SAMPLES=0
+  fi
+  (( STALL_LOW_CPU_SAMPLES >= STALL_SAMPLES )) || return 0
+  now="$(/bin/date +%s)"
+  (( STALL_LAST_SNAPSHOT_EPOCH == 0 || now - STALL_LAST_SNAPSHOT_EPOCH >= STALL_COOLDOWN_SECONDS )) || return 0
+  collect_stall_snapshot "low-cpu-foreground" "$pid"
+  STALL_LOW_CPU_SAMPLES=0
+}
+
+append_low_frequency_sample() {
+  local pid="$1" now row
+  now="$(/bin/date +%s)"
+  if (( LOW_FREQUENCY_LAST_SAMPLE_EPOCH > 0 && now - LOW_FREQUENCY_LAST_SAMPLE_EPOCH < LOW_FREQUENCY_SAMPLE_INTERVAL_SECONDS )); then
+    return 0
+  fi
+  LOW_FREQUENCY_LAST_SAMPLE_EPOCH="$now"
+  row="$("$STALL_PS_BIN" -p "$pid" -o pid=,uid=,%cpu=,rss=,state=,command= 2>/dev/null | /usr/bin/awk \
+    -v target="$pid" -v uid="$(/usr/bin/id -u)" -v root="$WINDOWS_GAME_ROOT" '
+    {
+      executable=$6
+      gsub(/\\/, "/", executable)
+    }
+    $1 == target && $2 == uid && executable == "C:/Games/" root "/dwrg.exe" {
+      printf "pid=%s cpu_pct=%s rss_kib=%s state=%s", $1, $3, $4, $5
+      exit
+    }
+  ')"
+  if [[ -n "$row" ]]; then
+    print -r -- "telemetry time=$(/bin/date '+%Y-%m-%dT%H:%M:%S%z') product=$PRODUCT $row" >>"$LOG_FILE"
+  else
+    print -r -- "telemetry time=$(/bin/date '+%Y-%m-%dT%H:%M:%S%z') product=$PRODUCT state=waiting-for-game" >>"$LOG_FILE"
+  fi
+}
+
+cleanup_stall_watch() {
+  local worker="$STALL_SAMPLE_WORKER_PID" child child_parent worker_state
+  if [[ "$worker" == <-> ]]; then
+    child="$(/bin/cat "$STALL_SAMPLE_WORKER_DIR/.sample.pid" 2>/dev/null || true)"
+    if [[ "$child" == <-> ]]; then
+      child_parent="$(/bin/ps -p "$child" -o ppid= 2>/dev/null | /usr/bin/tr -d ' ' || true)"
+      if [[ "$child_parent" == "$worker" ]]; then
+        /bin/kill -TERM "$child" >/dev/null 2>&1 || true
+      fi
+    fi
+    /bin/kill -TERM "$worker" >/dev/null 2>&1 || true
+    for _ in {1..10}; do
+      /bin/kill -0 "$worker" >/dev/null 2>&1 || break
+      /bin/sleep 0.1
+    done
+    worker_state="$(/bin/ps -p "$worker" -o state= 2>/dev/null | /usr/bin/tr -d ' ' || true)"
+    [[ -z "$worker_state" || "$worker_state" == Z* ]] || /bin/kill -KILL "$worker" >/dev/null 2>&1 || true
+    wait "$worker" >/dev/null 2>&1 || true
+  fi
+  STALL_SAMPLE_WORKER_PID=""
+  STALL_SAMPLE_WORKER_DIR=""
+  STALL_SAMPLE_PID=""
+}
+
+set_game_mode_on() {
+  if [[ -x "$GAMEPOLICYCTL" ]]; then
+    "$GAMEPOLICYCTL" game-mode set on >>"$LOG_FILE" 2>&1 || true
+    "$GAMEPOLICYCTL" game-mode status >>"$LOG_FILE" 2>&1 || true
+  fi
+}
+
+restore_game_mode_auto() {
+  if [[ -x "$GAMEPOLICYCTL" ]]; then
+    "$GAMEPOLICYCTL" game-mode set auto >>"$LOG_FILE" 2>&1 || true
+    "$GAMEPOLICYCTL" game-mode status >>"$LOG_FILE" 2>&1 || true
+  fi
+}
+
+recover_mouse_acceleration_state() {
+  [[ -x "$MOUSE_ACCELERATION_CONTROLLER" && -f "$MOUSE_ACCELERATION_STATE_FILE" ]] || return 0
+  if [[ -z "$IDENTITYV_MOUSE_VENDOR_ID" || -z "$IDENTITYV_MOUSE_PRODUCT_ID" ]]; then
+    print -r -- "mouse acceleration recovery is waiting for an explicit pointing-device selection" >>"$LOG_FILE"
+    return 0
+  fi
+  if "$MOUSE_ACCELERATION_CONTROLLER" --end-session \
+    --vendor-id "$IDENTITYV_MOUSE_VENDOR_ID" \
+    --product-id "$IDENTITYV_MOUSE_PRODUCT_ID" \
+    --state-file "$MOUSE_ACCELERATION_STATE_FILE" >>"$LOG_FILE" 2>&1; then
+    print -r -- "recovered mouse acceleration after an unclean previous exit" >>"$LOG_FILE"
+  else
+    print -r -- "mouse acceleration recovery failed closed; preserving its private session state" >>"$LOG_FILE"
+  fi
+}
+
+begin_mouse_acceleration_session() {
+  [[ "$PRODUCT" == "mainland" ]] || return 0
+  recover_mouse_acceleration_state
+  if [[ "$IDENTITYV_DISABLE_MOUSE_ACCELERATION" != "1" ]]; then
+    print -r -- "per-app mouse acceleration control is disabled" >>"$LOG_FILE"
+    return 0
+  fi
+  if [[ ! -x "$MOUSE_ACCELERATION_CONTROLLER" ]]; then
+    print -r -- "mouse acceleration controller is missing" >>"$LOG_FILE"
+    return 0
+  fi
+  if [[ -z "$IDENTITYV_MOUSE_VENDOR_ID" || -z "$IDENTITYV_MOUSE_PRODUCT_ID" ]]; then
+    print -r -- "mouse acceleration controller requires an explicit pointing-device selection" >>"$LOG_FILE"
+    return 0
+  fi
+
+  if "$MOUSE_ACCELERATION_CONTROLLER" --begin-session \
+    --vendor-id "$IDENTITYV_MOUSE_VENDOR_ID" \
+    --product-id "$IDENTITYV_MOUSE_PRODUCT_ID" \
+    --state-file "$MOUSE_ACCELERATION_STATE_FILE" >>"$LOG_FILE" 2>&1; then
+    print -r -- "began mouse acceleration session before Wine launch" >>"$LOG_FILE"
+  else
+    # This is an input-quality enhancement, not a game start prerequisite.
+    # The helper has already restored any half-applied state before returning.
+    print -r -- "mouse acceleration session did not begin; launching game without this enhancement" >>"$LOG_FILE"
+  fi
+}
+
+end_mouse_acceleration_session() {
+  [[ -x "$MOUSE_ACCELERATION_CONTROLLER" && -f "$MOUSE_ACCELERATION_STATE_FILE" ]] || return 0
+  if [[ -z "$IDENTITYV_MOUSE_VENDOR_ID" || -z "$IDENTITYV_MOUSE_PRODUCT_ID" ]]; then
+    print -r -- "mouse acceleration cleanup failed closed; pointing-device selection is unavailable" >>"$LOG_FILE"
+    return 0
+  fi
+  if "$MOUSE_ACCELERATION_CONTROLLER" --end-session \
+    --vendor-id "$IDENTITYV_MOUSE_VENDOR_ID" \
+    --product-id "$IDENTITYV_MOUSE_PRODUCT_ID" \
+    --state-file "$MOUSE_ACCELERATION_STATE_FILE" >>"$LOG_FILE" 2>&1; then
+    print -r -- "ended mouse acceleration session" >>"$LOG_FILE"
+  else
+    print -r -- "mouse acceleration cleanup failed closed; preserving its private session state" >>"$LOG_FILE"
+  fi
+}
+
+end_function_key_watch() {
+  [[ "$FUNCTION_KEY_WATCH_PID" == <-> ]] || return 0
+  # Only signal our still-owned child. A helper that failed early can leave an
+  # old numeric PID behind; do not act on a later unrelated process using it.
+  local parent
+  parent="$(/bin/ps -p "$FUNCTION_KEY_WATCH_PID" -o ppid= 2>/dev/null | /usr/bin/tr -d ' ' || true)"
+  if [[ "$parent" == "$$" ]]; then
+    /bin/kill -TERM "$FUNCTION_KEY_WATCH_PID" 2>/dev/null || true
+    # The helper independently watches this runner, so cleanup never needs to
+    # block game shutdown indefinitely or SIGKILL a restoration in progress.
+  fi
+  FUNCTION_KEY_WATCH_PID=""
+}
+
+begin_function_key_watch() {
+  end_function_key_watch
+  [[ "$IDENTITYV_STANDARD_FUNCTION_KEYS" == "1" && -x "$FUNCTION_KEY_CONTROLLER" ]] || return 0
+  /usr/bin/env -u DYLD_INSERT_LIBRARIES -u DYLD_FALLBACK_LIBRARY_PATH \
+    "$FUNCTION_KEY_CONTROLLER" --watch --pid "$1" --parent-pid "$$" \
+    --state-file "$FUNCTION_KEY_STATE_FILE" >>"$LOG_FILE" 2>&1 &
+  FUNCTION_KEY_WATCH_PID=$!
+}
+
+cleanup_launcher() {
+  (( LAUNCHER_CLEANUP_DONE )) && return 0
+  LAUNCHER_CLEANUP_DONE=1
+  cleanup_stall_watch
+  end_function_key_watch
+  end_mouse_acceleration_session
+  stop_prefix_processes
+  restore_game_mode_auto
+}
+
+handle_launcher_signal() {
+  local signal_name="$1"
+  local exit_status="$2"
+  print -r -- "launcher received $signal_name; closing its verified Wine prefix" >>"$LOG_FILE"
+  cleanup_launcher
+  trap - EXIT INT TERM HUP
+  exit "$exit_status"
+}
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  clear_metal_hud_environment
+  "$@" >>"$LOG_FILE" 2>&1 &
+  local child_pid=$!
+  local elapsed=0
+  while /bin/kill -0 "$child_pid" >/dev/null 2>&1; do
+    if (( elapsed >= seconds )); then
+      print -r -- "timeout after ${seconds}s: $*" >>"$LOG_FILE"
+      /bin/kill "$child_pid" >/dev/null 2>&1 || true
+      sleep 1
+      /bin/kill -9 "$child_pid" >/dev/null 2>&1 || true
+      wait "$child_pid" >/dev/null 2>&1 || true
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  wait "$child_pid"
+}
+
+refresh_registry_contract() {
+  local contract registry_host_path registry_windows_path
+  [[ -n "$CJK_UI_FONT_FAMILY" && -n "$CJK_UI_FONT_FILENAME" ]] || {
+    print -r -- "Wine registry contract lacks a verified CJK UI font" >>"$LOG_FILE"
+    return 1
+  }
+  contract="$REGISTRY_CONTRACT_VERSION:$SELECTED_ENGINE_ID:$WINDOWS_GAME_ROOT:$CJK_UI_FONT_FAMILY:$CJK_UI_FONT_FILENAME"
+  if [[ -f "$REGISTRY_CONTRACT_MARKER" && ! -L "$REGISTRY_CONTRACT_MARKER" ]] &&
+      [[ "$(/bin/cat "$REGISTRY_CONTRACT_MARKER" 2>/dev/null || true)" == "$contract" ]]; then
+    print -r -- "Wine input/display registry contract already current: $contract" >>"$LOG_FILE"
+    return 0
+  fi
+
+  registry_host_path="$PREFIX/drive_c/windows/temp/identityv-launcher-contract-$$.reg"
+  registry_windows_path="C:\\windows\\temp\\identityv-launcher-contract-$$.reg"
+  /bin/mkdir -p "${registry_host_path:h}"
+  /bin/cat >| "$registry_host_path" <<'REGISTRY'
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Wine\Mac Driver]
+"RetinaMode"="Y"
+"LeftOptionIsAlt"="N"
+"RightOptionIsAlt"="N"
+"LeftCommandIsCtrl"="N"
+"RightCommandIsCtrl"="N"
+"EditMenu"="disabled"
+"UsePreciseScrolling"="N"
+"UseConfinementCursorClipping"="Y"
+"CursorClippingLocksWindows"="Y"
+REGISTRY
+  {
+    print -r -- '[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Fonts]'
+    print -r -- "\"$CJK_UI_FONT_FAMILY (TrueType)\"=\"$CJK_UI_FONT_FILENAME\""
+    print
+    print -r -- '[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]'
+    print -r -- "\"MS Shell Dlg\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"MS Shell Dlg 2\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"Microsoft YaHei\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"Microsoft YaHei UI\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"MicrosoftYaHei\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"SimSun\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"SimHei\"=\"$CJK_UI_FONT_FAMILY\""
+    print
+    # Fail closed after a Windows crash.  This prevents an AeDebug entry from
+    # recursively spawning winedbg/conhost processes and modal dialogs.
+    print -r -- '[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\AeDebug]'
+    print -r -- '"Auto"="1"'
+    print -r -- '"Debugger"=""'
+    print
+    print -r -- '[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Fonts]'
+    print -r -- "\"$CJK_UI_FONT_FAMILY (TrueType)\"=\"$CJK_UI_FONT_FILENAME\""
+    print
+    print -r -- '[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]'
+    print -r -- "\"MS Shell Dlg\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"MS Shell Dlg 2\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"Microsoft YaHei\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"Microsoft YaHei UI\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"MicrosoftYaHei\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"SimSun\"=\"$CJK_UI_FONT_FAMILY\""
+    print -r -- "\"SimHei\"=\"$CJK_UI_FONT_FAMILY\""
+    print
+    print -r -- '[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug]'
+    print -r -- '"Auto"="1"'
+    print -r -- '"Debugger"=""'
+    print
+    print -r -- '[HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers]'
+  } >>"$registry_host_path"
+  print -r -- "\"C:\\\\Games\\\\${WINDOWS_GAME_ROOT}\\\\dwrg.exe\"=\"~ HIGHDPIAWARE\"" >>"$registry_host_path"
+  /bin/chmod 600 "$registry_host_path"
+
+  if run_with_timeout 12 "$WINE_BIN" reg import "$registry_windows_path"; then
+    (umask 077; print -r -- "$contract" >| "$REGISTRY_CONTRACT_MARKER")
+    /bin/chmod 600 "$REGISTRY_CONTRACT_MARKER"
+    /bin/rm -f -- "$registry_host_path"
+    print -r -- "refreshed Retina, Command-to-Alt, disabled Mac Edit menu, discrete wheel scrolling, native cursor confinement, Win32 CJK UI font aliases and high-DPI registry contract in one import" >>"$LOG_FILE"
+    return 0
+  fi
+  /bin/rm -f -- "$registry_host_path"
+  print -r -- "Wine registry contract import failed; launch continues without publishing a current marker" >>"$LOG_FILE"
+  return 1
+}
+
+restart_marker_seen() {
+  local game_log="$GAME_DIR/log.txt"
+  [[ -f "$game_log" ]] || return 1
+  /usr/bin/tail -n 260 "$game_log" | /usr/bin/grep -E "show_restart_ui|need_restart['\"]?: True|need_restart.: True" >/dev/null 2>&1
+}
+
+launch_game_once() {
+  local input_trace=0
+  local login_readiness=""
+  local -a inserted_libraries hud_environment
+  if [[ -L "$INPUT_TRACE_ONCE_MARKER" ]]; then
+    print -r -- "ignored symlinked developer input trace marker" >>"$LOG_FILE"
+  elif [[ -f "$INPUT_TRACE_ONCE_MARKER" ]]; then
+    /bin/rm -f -- "$INPUT_TRACE_ONCE_MARKER"
+    input_trace=1
+  fi
+  if (( input_trace )); then
+    export WINEDEBUG="+timestamp,+key,+event,+rawinput,+dinput"
+    print -r -- "one-shot developer input trace enabled for this game session; trace records key codes, event batching and Windows input API state" >>"$LOG_FILE"
+  else
+    export WINEDEBUG="-all"
+  fi
+  inserted_libraries=("$COMMAND_GRAVE_FORWARDER")
+  if [[ -n "$AUDIO_INTERPOSER" ]]; then
+    inserted_libraries+=("$AUDIO_INTERPOSER")
+    print -r -- "enabled CoreAudio interposer stage: $IDENTITYV_AUDIO_INTERPOSER_STAGE" >>"$LOG_FILE"
+  fi
+  if [[ -x "$IDV_LOGIN_START_HELPER" && ! -L "$IDV_LOGIN_START_HELPER" ]] &&
+     [[ "$(/usr/bin/stat -f '%u:%Lp' "$IDV_LOGIN_START_HELPER" 2>/dev/null || true)" == "0:755" ]]; then
+    login_readiness="$(/usr/bin/sudo -n "$IDV_LOGIN_START_HELPER" --status 2>/dev/null | /usr/bin/tail -n 1 || true)"
+  fi
+  if [[ "$login_readiness" == "IDV_LOGIN_READINESS=ready" ]]; then
+    inserted_libraries+=("$LOGIN_DNS_COMPAT")
+    print -r -- "enabled IDV Login Wine-local DNS compatibility layer after exact readiness gate" >>"$LOG_FILE"
+  else
+    print -r -- "IDV Login DNS compatibility layer inactive: proxy is not exactly ready" >>"$LOG_FILE"
+  fi
+  export DYLD_INSERT_LIBRARIES="${(j.:.)inserted_libraries}"
+  if [[ "$IDENTITYV_USE_VIRTUAL_DESKTOP" == "1" ]]; then
+    # Wine explorer is a bootstrap chain, not the final dwrg.exe child. Keep
+    # this optional path HUD-free instead of leaking diagnostics into it.
+    if [[ "$METAL_HUD_ENABLED" == "1" ]]; then
+      print -r -- "Metal HUD requested but disabled for virtual desktop bootstrap" >>"$LOG_FILE"
+    else
+      print -r -- "Metal HUD disabled for virtual desktop bootstrap" >>"$LOG_FILE"
+    fi
+    print -r -- "launch mode: virtual desktop ${IDENTITYV_DESKTOP_NAME},${IDENTITYV_DESKTOP_SIZE}" >>"$LOG_FILE"
+    "$WINE_BIN" explorer "/desktop=${IDENTITYV_DESKTOP_NAME},${IDENTITYV_DESKTOP_SIZE}" "C:\\Games\\${WINDOWS_GAME_ROOT}\\dwrg.exe" "${GAME_LAUNCH_ARGUMENTS[@]}" >>"$LOG_FILE" 2>&1 &
+  else
+    if [[ "$METAL_HUD_ENABLED" == "1" ]]; then
+      # Apple exposes no reliable "expanded" environment switch. Keep a
+      # fixed, complete first-view layout rather than pretending one exists.
+      hud_environment=(
+        MTL_HUD_ENABLED=1
+        MTL_HUD_DISABLE_MENU_BAR=1
+        MTL_HUD_LOG_ENABLED=0
+        MTL_HUD_SHOW_METRICS_RANGE=1
+        MTL_HUD_SCALE=0.16
+        MTL_HUD_ALIGNMENT=topright
+        MTL_HUD_ELEMENTS=device,layersize,memory,fps,frameinterval,gputime,presentdelay,frameintervalgraph,fpsgraph
+      )
+      print -r -- "Metal HUD enabled for final dwrg.exe child only" >>"$LOG_FILE"
+    else
+      hud_environment=()
+      print -r -- "Metal HUD disabled for final dwrg.exe child" >>"$LOG_FILE"
+    fi
+    print -r -- "launch mode: direct" >>"$LOG_FILE"
+    # Do not put /usr/bin/env between this shell and Wine: SIP removes
+    # DYLD_FALLBACK_LIBRARY_PATH when launching that system executable, which
+    # prevents Wine from resolving its bundled FreeType.  The shell child
+    # retains the runner's library path, adds HUD vars only for direct dwrg,
+    # then execs Wine so LAUNCHED_WINE_PID is still Wine's PID.
+    (
+      if (( ${#hud_environment[@]} )); then
+        export "${hud_environment[@]}"
+      fi
+      exec "$WINE_BIN" "C:\\Games\\${WINDOWS_GAME_ROOT}\\dwrg.exe" "${GAME_LAUNCH_ARGUMENTS[@]}"
+    ) >>"$LOG_FILE" 2>&1 &
+  fi
+  LAUNCHED_WINE_PID=$!
+  # `print -r` deliberately preserves backslashes, so a quoted `\n` payload
+  # becomes one malformed line.  Emit real lines: the product manager and stop
+  # path treat this file as the authority for a runner-owned session.
+  (umask 077; /usr/bin/printf 'schema=1\nproduct=%s\nrunner_pid=%s\nwine_pid=%s\nwindows_root=%s\n' \
+    "$PRODUCT" "$$" "$LAUNCHED_WINE_PID" "$WINDOWS_GAME_ROOT" >| "$RUN_SESSION_FILE")
+}
+
+stop_prefix_processes() {
+  # This runner gets PREFIX and WINESERVER_BIN only after both were resolved
+  # against the selected volume/runtime.  Keep the guard here as well: a
+  # cleanup path must never turn a malformed environment into a request to an
+  # unrelated Wine prefix (for example IDV Login or the other service).
+  if [[ -z "${PREFIX:-}" || "${WINEPREFIX:-}" != "$PREFIX" || ! -x "${WINESERVER_BIN:-}" ]]; then
+    print -r -- "skip Wine prefix cleanup: verified runner environment is unavailable" >>"$LOG_FILE"
+    return 1
+  fi
+
+  clear_metal_hud_environment
+  print -r -- "requesting Wine prefix cleanup for $PREFIX" >>"$LOG_FILE"
+  "$WINESERVER_BIN" -k >>"$LOG_FILE" 2>&1 || true
+
+  # -k asks the wineserver for this exact WINEPREFIX to close every client;
+  # -w confirms that its own services (explorer/rpcss/winedevice, etc.) have
+  # actually drained.  Bound that confirmation so an unhealthy wineserver can
+  # never make a launcher restart wait forever.
+  "$WINESERVER_BIN" -w >>"$LOG_FILE" 2>&1 &
+  local wait_pid=$!
+  local attempt
+  for attempt in {1..30}; do
+    /bin/kill -0 "$wait_pid" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  if /bin/kill -0 "$wait_pid" >/dev/null 2>&1; then
+    print -r -- "Wine prefix cleanup confirmation timed out after 3s" >>"$LOG_FILE"
+    /bin/kill -TERM "$wait_pid" >/dev/null 2>&1 || true
+    local terminate_attempt
+    for terminate_attempt in {1..10}; do
+      /bin/kill -0 "$wait_pid" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+    /bin/kill -KILL "$wait_pid" >/dev/null 2>&1 || true
+  fi
+  wait "$wait_pid" >/dev/null 2>&1 || true
+}
+
+reset_prefix_if_display_changed() {
+  local current_signature previous_signature
+  current_signature="$(/usr/sbin/system_profiler SPDisplaysDataType 2>/dev/null | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}')"
+  [[ -n "$current_signature" ]] || return 0
+  previous_signature="$(/bin/cat "$DISPLAY_SIGNATURE_FILE" 2>/dev/null || true)"
+  if [[ -n "$previous_signature" && "$previous_signature" != "$current_signature" ]]; then
+    print -r -- "display mode changed; resetting Wine prefix so Retina state can reinitialize" >>"$LOG_FILE"
+    stop_prefix_processes
+  fi
+  print -r -- "$current_signature" >| "$DISPLAY_SIGNATURE_FILE"
+}
+
+ensure_private_standard_folders() {
+  local mac_home windows_user_dir folder_name mac_folder_name wine_folder mac_folder entry resolved_target i
+  local -a protected_windows_folders protected_macos_folders
+  mac_home="$(/bin/realpath "$HOME" 2>/dev/null || true)"
+  [[ -n "$mac_home" ]] || return 0
+  protected_windows_folders=(Desktop Documents Downloads Pictures Music Videos)
+  # CrossOver exposes the macOS Movies folder as the Windows Videos folder.
+  protected_macos_folders=(Desktop Documents Downloads Pictures Music Movies)
+
+  # A CodeWeavers prefix commonly uses a Windows account such as "crossover"
+  # instead of the current macOS short name. Inspect every Windows profile and
+  # keep only its private copies of standard folders.  We deliberately remove
+  # a link only when it resolves into the signed-in user's matching macOS
+  # folder, never merely because it is a link.
+  for windows_user_dir in "$PREFIX"/drive_c/users/*(/N); do
+    for ((i = 1; i <= ${#protected_windows_folders}; i++)); do
+      folder_name="${protected_windows_folders[i]}"
+      mac_folder_name="${protected_macos_folders[i]}"
+      wine_folder="$windows_user_dir/$folder_name"
+      # Resolve the macOS standard folder itself: users may relocate one via a
+      # symlink, for example moving Downloads to another volume.
+      mac_folder="$(/bin/realpath "$mac_home/$mac_folder_name" 2>/dev/null || true)"
+      [[ -n "$mac_folder" ]] || continue
+
+      if [[ -L "$wine_folder" ]]; then
+        resolved_target="$(/bin/realpath "$wine_folder" 2>/dev/null || true)"
+        if [[ "$resolved_target" == "$mac_folder" || "$resolved_target" == "$mac_folder"/* ]]; then
+          /bin/rm "$wine_folder" >>"$LOG_FILE" 2>&1 || continue
+          /bin/mkdir -p "$wine_folder" >>"$LOG_FILE" 2>&1 || true
+          print -r -- "isolated Wine $folder_name for Windows user ${windows_user_dir:t}" >>"$LOG_FILE"
+        fi
+      fi
+
+      [[ -d "$wine_folder" && ! -L "$wine_folder" ]] || continue
+      while IFS= read -r -d '' entry; do
+        resolved_target="$(/bin/realpath "$entry" 2>/dev/null || true)"
+        if [[ "$resolved_target" == "$mac_folder" || "$resolved_target" == "$mac_folder"/* ]]; then
+          /bin/rm "$entry" >>"$LOG_FILE" 2>&1 || continue
+          print -r -- "removed macOS $folder_name bridge ${entry:t} for Windows user ${windows_user_dir:t}" >>"$LOG_FILE"
+        fi
+      done < <(/usr/bin/find -P "$wine_folder" -type l -print0 2>/dev/null)
+    done
+  done
+}
+
+FONT_SOURCE_DIR=""
+IMM32_SRC=""
+CJK_UI_FONT_FAMILY=""
+CJK_UI_FONT_FILENAME=""
+
+case "$LAUNCH_PROFILE" in
+  codeweavers-wine-release-dxmt)
+    FONT_SOURCE_DIR="$ENGINE/share/wine/fonts"
+    IMM32_SRC="$ENGINE/lib/wine/x86_64-windows/imm32.dll"
+    export PATH="$ENGINE/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    export CX_ROOT="$ENGINE"
+    export WINELOADER="$WINE_BIN"
+    export WINESERVER="$WINESERVER_BIN"
+    export WINEDLLPATH="$ENGINE/lib/wine"
+    unset DYLD_LIBRARY_PATH WINEESYNC
+    export DYLD_FALLBACK_LIBRARY_PATH="$ENGINE/lib64"
+    export GST_PLUGIN_SYSTEM_PATH="$ENGINE/lib64/gstreamer-1.0"
+    export GST_REGISTRY="$PREFIX/gstreamer-1.0-registry.x86_64.bin"
+    export SSL_CERT_FILE="/etc/ssl/cert.pem"
+    export QMLSCENE_DEVICE="softwarecontext"
+    export DOTNET_EnableWriteXorExecute=0
+    export SIM_BACKEND_OVERRIDE=2
+    export ROSETTA_ADVERTISE_AVX=1
+    export WINEMSYNC=1
+    export WINEDLLOVERRIDES="mscoree,mshtml=;d3d9=b;d3d8=b;nvapi,nvapi64,nvngx=d;d3dcompiler_47=n,b;winegstreamer="
+    ;;
+  sikarugir-wswine-dxmt)
+    LEGACY_BASE="${GAME_DIR:h}"
+    [[ "$ENGINE" == "$LEGACY_BASE"/* && "$PREFIX" == "$LEGACY_BASE"/* ]] || abort_launcher "legacy fallback components do not share the configured install root"
+    WRAPPER="$LEGACY_BASE/sikarugir-wrapper/IdentityV-Sikarugir.app"
+    WINE_STAGING_APP="$LEGACY_BASE/Applications/Wine Staging.app"
+    WINE_STAGING_LIB="$WINE_STAGING_APP/Contents/Resources/wine/lib"
+    FONT_SOURCE_DIR="$WINE_STAGING_APP/Contents/Resources/wine/share/wine/fonts"
+    FRAMEWORKS="$WRAPPER/Contents/Frameworks"
+    [[ -d "$FRAMEWORKS" && -f "$ENGINE/lib/libinotify.0.dylib" ]] || abort_launcher "legacy fallback support libraries are incomplete"
+    DYLD_PATH="$FRAMEWORKS:$FRAMEWORKS/moltenvkcx:$ENGINE/lib"
+    if [[ -d "$WINE_STAGING_LIB" ]]; then
+      DYLD_PATH="$WINE_STAGING_LIB:$DYLD_PATH"
+    fi
+    IMM32_SRC="$ENGINE/lib/wine/x86_64-windows/imm32.dll"
+    export PATH="$ENGINE/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    export WINEDLLPATH="$ENGINE/lib/wine/x86_64-windows:$ENGINE/lib/wine/i386-windows:$ENGINE/lib/wine"
+    export DYLD_LIBRARY_PATH="$DYLD_PATH"
+    export DYLD_FALLBACK_LIBRARY_PATH="$DYLD_PATH:/usr/lib"
+    unset CX_ROOT WINELOADER WINESERVER GST_PLUGIN_SYSTEM_PATH GST_REGISTRY QMLSCENE_DEVICE DOTNET_EnableWriteXorExecute SIM_BACKEND_OVERRIDE ROSETTA_ADVERTISE_AVX
+    export WINEESYNC=1
+    export WINEMSYNC=1
+    export WINEDLLOVERRIDES="mscoree,mshtml=;d3d9=b;d3d8=b;nvapi,nvapi64,nvngx=d;dxgi,d3d11,d3d10core,winemetal=b,n;d3dcompiler_47=n,b"
+    ;;
+esac
+
+ensure_prefix_fonts() {
+  local fonts_dst="$PREFIX/drive_c/windows/Fonts"
+  /bin/mkdir -p "$fonts_dst" >>"$LOG_FILE" 2>&1 || return 0
+
+  local changed=0
+  local font target
+  if [[ -d "$FONT_SOURCE_DIR" ]]; then
+    for font in "$FONT_SOURCE_DIR"/*(.N); do
+      case "${font:t:l}" in
+        *.ttf|*.ttc|*.otf|*.fon)
+          target="$fonts_dst/${font:t}"
+          if [[ ! -e "$target" ]]; then
+            /bin/cp -p "$font" "$target" >>"$LOG_FILE" 2>&1 && changed=1
+          fi
+          ;;
+      esac
+    done
+  fi
+
+  local mac_fonts=(
+    "/System/Library/Fonts/Hiragino Sans GB.ttc"
+    "/System/Library/Fonts/STHeiti Medium.ttc"
+    "/System/Library/Fonts/STHeiti Light.ttc"
+    "/System/Library/Fonts/Supplemental/Songti.ttc"
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+    "/System/Library/Fonts/Supplemental/Arial.ttf"
+    "/System/Library/Fonts/Supplemental/Tahoma.ttf"
+  )
+  for font in "${mac_fonts[@]}"; do
+    [[ -f "$font" ]] || continue
+    target="$fonts_dst/${font:t}"
+    if [[ ! -e "$target" ]]; then
+      /bin/ln -s "$font" "$target" >>"$LOG_FILE" 2>&1 || /bin/cp -p "$font" "$target" >>"$LOG_FILE" 2>&1 || true
+      [[ -e "$target" ]] && changed=1
+    fi
+  done
+
+  if (( changed )); then
+    print -r -- "installed Wine/macOS fallback fonts into prefix Fonts" >>"$LOG_FILE"
+  fi
+
+  local source candidate_family candidate_filename index
+  local -a cjk_sources cjk_families
+  cjk_sources=(
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+    "/System/Library/Fonts/Hiragino Sans GB.ttc"
+    "/System/Library/Fonts/STHeiti Medium.ttc"
+    "/System/Library/Fonts/Supplemental/Songti.ttc"
+  )
+  cjk_families=("Arial Unicode MS" "Hiragino Sans GB" "Heiti SC" "Songti SC")
+  for (( index = 1; index <= ${#cjk_sources}; index++ )); do
+    source="${cjk_sources[$index]}"
+    [[ -f "$source" ]] || continue
+    candidate_filename="${source:t}"
+    target="$fonts_dst/$candidate_filename"
+    if [[ -f "$target" ]] && { /bin/test "$target" -ef "$source" || /usr/bin/cmp -s "$target" "$source"; }; then
+      candidate_family="${cjk_families[$index]}"
+      CJK_UI_FONT_FAMILY="$candidate_family"
+      CJK_UI_FONT_FILENAME="$candidate_filename"
+      print -r -- "selected verified Win32 CJK UI font: $CJK_UI_FONT_FAMILY ($CJK_UI_FONT_FILENAME)" >>"$LOG_FILE"
+      return 0
+    fi
+    print -r -- "ignored unverified CJK font target: $target" >>"$LOG_FILE"
+  done
+  print -r -- "no verified macOS CJK UI font is available in prefix Fonts" >>"$LOG_FILE"
+  return 1
+}
+
+configure_catalog_cjk_font() {
+  local family filename expected target actual
+  family="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.fontConfiguration.cjkFamily" || true)"
+  filename="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.fontConfiguration.cjkFilename" || true)"
+  expected="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.fontConfiguration.cjkSha256" || true)"
+  [[ -n "$family$filename$expected" ]] || return 0
+  [[ -n "$family" && ${#family} -lt 32 ]] || return 1
+  case "$family" in *'"'*|*'\'*|*$'\n'*|*$'\r'*) return 1 ;; esac
+  validate_relative_path "$filename" || return 1
+  [[ "$filename" != */* && ${#expected} -eq 64 && "$expected" != *[!0-9A-Fa-f]* ]] || return 1
+  target="$PREFIX/drive_c/windows/Fonts/$filename"
+  [[ -f "$target" && ! -L "$target" ]] || return 1
+  actual="$(/usr/bin/shasum -a 256 "$target" | /usr/bin/awk '{print $1}')"
+  [[ "${actual:l}" == "${expected:l}" ]] || return 1
+  CJK_UI_FONT_FAMILY="$family"
+  CJK_UI_FONT_FILENAME="$filename"
+  print -r -- "selected verified catalog CJK/emoji font: $family ($filename)" >>"$LOG_FILE"
+}
+
+# The mainland client ships a matching native 64-bit D3DCompiler beside its
+# CEF webview.  Wine's builtin compiler rejects one of its terrain shaders,
+# but accepting an arbitrary DLL here would turn a launcher workaround into a
+# game-tree injection point.  Bind the one permitted candidate to the game's
+# own patch manifest before placing it in this prefix only.
+d3dcompiler_file_is_64() {
+  local inspected
+  inspected="$(/usr/bin/file -b "$1" 2>/dev/null || true)"
+  [[ "$inspected" == *"PE32+"* && "$inspected" == *"x86-64"* ]]
+}
+
+native_d3dcompiler_manifest_entry() {
+  local manifest="$1" source_relative="$2" xml entry size digest hash md5 key_count size_count hash_count md5_count raw_key_count
+  [[ -n "$source_relative" && "$source_relative" != *[!A-Za-z0-9._/-]* ]] || return 1
+  [[ -f "$manifest" && ! -L "$manifest" ]] || return 1
+  raw_key_count="$(LC_ALL=C /usr/bin/grep -o -F -- "\"$source_relative\"" "$manifest" 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d '[:space:]')"
+  [[ "$raw_key_count" == 1 ]] || return 1
+  xml="$(/usr/bin/mktemp /tmp/identityv-engine-patch.XXXXXX)" || return 1
+  /bin/chmod 600 "$xml" 2>/dev/null || { /bin/rm -f -- "$xml"; return 1; }
+  /usr/bin/plutil -convert xml1 -o "$xml" "$manifest" >/dev/null 2>&1 || { /bin/rm -f -- "$xml"; return 1; }
+  entry="/plist/dict/key[text()='$source_relative']/following-sibling::*[1][self::dict]"
+  key_count="$(/usr/bin/xmllint --xpath "count(/plist/dict/key[text()='$source_relative'])" "$xml" 2>/dev/null || true)"
+  size_count="$(/usr/bin/xmllint --xpath "count($entry/key[text()='size']/following-sibling::*[1][self::integer])" "$xml" 2>/dev/null || true)"
+  hash_count="$(/usr/bin/xmllint --xpath "count($entry/key[text()='hash']/following-sibling::*[1][self::string])" "$xml" 2>/dev/null || true)"
+  md5_count="$(/usr/bin/xmllint --xpath "count($entry/key[text()='md5']/following-sibling::*[1][self::string])" "$xml" 2>/dev/null || true)"
+  size="$(/usr/bin/xmllint --xpath "string($entry/key[text()='size']/following-sibling::*[1][self::integer])" "$xml" 2>/dev/null || true)"
+  hash="$(/usr/bin/xmllint --xpath "string($entry/key[text()='hash']/following-sibling::*[1][self::string])" "$xml" 2>/dev/null || true)"
+  md5="$(/usr/bin/xmllint --xpath "string($entry/key[text()='md5']/following-sibling::*[1][self::string])" "$xml" 2>/dev/null || true)"
+  /bin/rm -f -- "$xml"
+  # NetEase calls the 32-hex MD5 value `hash` in current manifests, while
+  # older manifests called it `md5`.  Accept exactly one spelling: accepting
+  # both (or an untyped lookalike) would make this game-tree boundary
+  # ambiguous.  The value is still checked with /sbin/md5 below.
+  if [[ "$hash_count" == 1 && "$md5_count" == 0 ]]; then
+    digest="$hash"
+  elif [[ "$hash_count" == 0 && "$md5_count" == 1 ]]; then
+    digest="$md5"
+  else
+    return 1
+  fi
+  [[ "$key_count" == 1 && "$size_count" == 1 && "$size" == <-> && "$digest" != *[!0-9A-Fa-f]* && ${#digest} -eq 32 ]] || return 1
+  print -r -- "$size ${digest:l}"
+}
+
+install_verified_native_d3dcompiler() {
+  # Both r1 and self-built Wine need this for terrain shaders. A fresh r1
+  # installation must first let the game create its patch manifest; defer only
+  # while that file is absent, then apply the same strict verification on the
+  # next launch. Existing but invalid manifests never authorize a DLL copy.
+  [[ "$PRODUCT" == "mainland" &&
+     "$LAUNCH_PROFILE" == "codeweavers-wine-release-dxmt" &&
+     ( "$D3DCOMPILER47_POLICY" == "verified-game-native-dynamic-only" ||
+       "$D3DCOMPILER47_POLICY" == "verified-game-native-when-manifest-present" ) ]] || return 0
+  local candidate source_relative manifest expected actual_size actual_md5 source_count=0
+  local source_dir target_parent target temp prefix_real target_parent_real chain_part
+  manifest="$GAME_DIR/Documents/engine_patch_check.file"
+  if [[ "$D3DCOMPILER47_POLICY" == "verified-game-native-when-manifest-present" &&
+        ! -e "$manifest" && ! -L "$manifest" ]]; then
+    print -r -- "native D3DCompiler deferred: game patch manifest not yet created; retry on next launch" >>"$LOG_FILE"
+    return 0
+  fi
+  for candidate in "$GAME_DIR"/webviewsupport.cef*/d3dcompiler_47.dll(N); do
+    source_dir="${candidate:h}"
+    [[ -f "$candidate" && ! -L "$candidate" && -d "$source_dir" && ! -L "$source_dir" ]] || continue
+    [[ "${source_dir:t}" == webviewsupport.cef?* && "${source_dir:t}" != *[!A-Za-z0-9._-]* ]] || continue
+    source_relative="${candidate#$GAME_DIR/}"
+    validate_relative_path "$source_relative" || continue
+    [[ -n "$source_relative" && "$source_relative" != *[!A-Za-z0-9._/-]* ]] || continue
+    source_count=$((source_count + 1))
+    source="$candidate"
+  done
+  (( source_count == 1 )) || abort_launcher "native D3DCompiler source is missing or ambiguous"
+  expected="$(native_d3dcompiler_manifest_entry "$manifest" "$source_relative" || true)"
+  [[ "$expected" == <->\ * && "${expected##* }" != *[!0-9a-f]* && ${#expected##* } -eq 32 ]] || abort_launcher "native D3DCompiler manifest entry is unavailable or invalid"
+  actual_size="$(/usr/bin/stat -f '%z' "$source" 2>/dev/null || true)"
+  actual_md5="$(/sbin/md5 -q "$source" 2>/dev/null || true)"
+  [[ "$actual_size" == "${expected%% *}" && "${actual_md5:l}" == "${expected##* }" ]] || abort_launcher "native D3DCompiler integrity check failed"
+  d3dcompiler_file_is_64 "$source" || abort_launcher "native D3DCompiler is not a 64-bit PE32+ DLL"
+
+  prefix_real="$(/bin/realpath "$PREFIX" 2>/dev/null || true)"
+  [[ -n "$prefix_real" && -d "$prefix_real" ]] || abort_launcher "Wine prefix cannot be canonicalized for native D3DCompiler"
+  for chain_part in "$PREFIX/drive_c" "$PREFIX/drive_c/windows" "$PREFIX/drive_c/windows/system32"; do
+    [[ -d "$chain_part" && ! -L "$chain_part" ]] || abort_launcher "Wine system32 target directory is unsafe"
+  done
+  target_parent="$PREFIX/drive_c/windows/system32"
+  target_parent_real="$(/bin/realpath "$target_parent" 2>/dev/null || true)"
+  [[ "$target_parent_real" == "$prefix_real"/* ]] || abort_launcher "Wine system32 target directory escapes the selected prefix"
+  target_parent="$target_parent_real"
+  target="$target_parent/d3dcompiler_47.dll"
+  if [[ -f "$target" && ! -L "$target" ]] &&
+     [[ "$(/usr/bin/stat -f '%z' "$target" 2>/dev/null || true)" == "$actual_size" ]] &&
+     [[ "$(/sbin/md5 -q "$target" 2>/dev/null || true)" == "${actual_md5:l}" ]]; then
+    print -r -- "native D3DCompiler already current: $source_relative md5=${actual_md5:l}" >>"$LOG_FILE"
+    return 0
+  fi
+  temp="$(/usr/bin/mktemp "$target_parent/.identityv-d3dcompiler.XXXXXX")" || abort_launcher "cannot stage native D3DCompiler"
+  /bin/chmod 600 "$temp" || { /bin/rm -f -- "$temp"; abort_launcher "cannot protect native D3DCompiler staging file"; }
+  /bin/cp "$source" "$temp" || { /bin/rm -f -- "$temp"; abort_launcher "cannot stage native D3DCompiler"; }
+  [[ "$(/usr/bin/stat -f '%z' "$temp" 2>/dev/null || true)" == "$actual_size" ]] &&
+    [[ "$(/sbin/md5 -q "$temp" 2>/dev/null || true)" == "${actual_md5:l}" ]] && d3dcompiler_file_is_64 "$temp" || {
+      /bin/rm -f -- "$temp"; abort_launcher "native D3DCompiler staging verification failed"; }
+  /bin/chmod 644 "$temp" || { /bin/rm -f -- "$temp"; abort_launcher "cannot finalize native D3DCompiler staging file"; }
+  /bin/mv -f "$temp" "$target" || { /bin/rm -f -- "$temp"; abort_launcher "cannot install native D3DCompiler"; }
+  print -r -- "installed verified native D3DCompiler: $source_relative md5=${actual_md5:l}" >>"$LOG_FILE"
+}
+
+export WINEPREFIX="$PREFIX"
+# Registry setup and helper Wine calls must never inherit an audio candidate or
+# a diagnostic HUD. The only HUD injection is the final dwrg.exe child below.
+unset DYLD_INSERT_LIBRARIES
+clear_metal_hud_environment
+export WINEDEBUG="-all"
+
+if (( PREFLIGHT_ONLY )); then
+  print -r -- "Identity V launcher preflight passed: $SELECTED_ENGINE_ID ($LAUNCH_PROFILE), CoreAudio=$IDENTITYV_AUDIO_INTERPOSER_STAGE"
+  exit 0
+fi
+
+trap 'clear_run_session; cleanup_launcher' EXIT
+trap 'handle_launcher_signal INT 130' INT
+trap 'handle_launcher_signal TERM 143' TERM
+trap 'handle_launcher_signal HUP 129' HUP
+
+existing_game_pid=""
+if [[ -f "$RUN_SESSION_FILE" && ! -L "$RUN_SESSION_FILE" ]]; then
+  session_product="$(/usr/bin/awk -F= '$1 == "product" { print $2; exit }' "$RUN_SESSION_FILE" 2>/dev/null || true)"
+  session_pid="$(/usr/bin/awk -F= '$1 == "wine_pid" { print $2; exit }' "$RUN_SESSION_FILE" 2>/dev/null || true)"
+  if [[ "$session_product" == "$PRODUCT" && "$session_pid" == <-> ]]; then
+    session_command="$(/bin/ps -p "$session_pid" -o command= 2>/dev/null || true)"
+    [[ "$session_command" == *"C:\\Games\\${WINDOWS_GAME_ROOT}\\dwrg.exe"* ]] && existing_game_pid="$session_pid"
+  fi
+fi
+if [[ -z "$existing_game_pid" ]]; then
+  # This is a collision guard only, never a cleanup selector.  The escaped
+  # trailing backslash keeps IdentityV distinct from IdentityVGlobal.
+  existing_game_pid="$(/usr/bin/pgrep -u "$(id -u)" -f "C:\\\\Games\\\\${WINDOWS_GAME_ROOT}\\\\dwrg[.]exe" | /usr/bin/head -n 1 || true)"
+fi
+if [[ -n "$existing_game_pid" ]]; then
+  print -r -- "game already running as pid $existing_game_pid; leave the active Wine session untouched" >>"$LOG_FILE"
+  trap - EXIT INT TERM HUP
+  exit 0
+fi
+
+reset_prefix_if_display_changed
+
+# Wine caches fonts and macdrv settings per session. Remove stale prefix
+# helpers before changing either the managed Fonts directory or the registry
+# contract, so an existing wineserver cannot retain old aliases or input state.
+stop_prefix_processes
+recover_mouse_acceleration_state
+if [[ -x "$FUNCTION_KEY_CONTROLLER" ]]; then
+  "$FUNCTION_KEY_CONTROLLER" --recover --state-file "$FUNCTION_KEY_STATE_FILE" >>"$LOG_FILE" 2>&1 || true
+fi
+ensure_private_standard_folders
+ensure_prefix_fonts || abort_launcher "no verified CJK UI font is available"
+configure_catalog_cjk_font || abort_launcher "the selected engine's CJK/emoji font is missing or invalid"
+
+IMM32_DST="$GAME_DIR/imm32.dll"
+if [[ -f "$IMM32_SRC" && ! -e "$IMM32_DST" ]]; then
+  /bin/cp "$IMM32_SRC" "$IMM32_DST" >>"$LOG_FILE" 2>&1 || true
+  /bin/chmod 644 "$IMM32_DST" >>"$LOG_FILE" 2>&1 || true
+fi
+
+# These values define the launcher's input/display contract.  Import them in a
+# single Wine process and publish a versioned marker only after success; this
+# removes ten serial Wine startups from every normal launch while still
+# retrying automatically when the contract or selected runtime changes.
+refresh_registry_contract || true
+# Registry and Wine helper calls above are the last prefix mutations before
+# launch.  Install only now, so their initialization cannot replace the DLL.
+install_verified_native_d3dcompiler
+begin_mouse_acceleration_session
+
+cd "$GAME_DIR" || exit 1
+if [[ "$IDENTITYV_FORCE_GAME_MODE" == "1" ]]; then
+  set_game_mode_on
+else
+  print -r -- "skip forced Game Mode; restoring automatic policy for minimal regression test" >>"$LOG_FILE"
+  restore_game_mode_auto
+fi
+exit_code=0
+restart_count=0
+
+while true; do
+  initialize_stall_watch
+  game_log_sig_before="$(/usr/bin/stat -f '%m:%z' "$GAME_DIR/log.txt" 2>/dev/null || print -r -- absent)"
+  seen_log_activity=0
+  print -r -- "launch wine at $(/bin/date '+%Y-%m-%d %H:%M:%S %Z')" >>"$LOG_FILE"
+  launch_game_once
+  wine_pid="$LAUNCHED_WINE_PID"
+  if [[ -z "$wine_pid" ]]; then
+    print -r -- "failed to capture launched Wine PID" >>"$LOG_FILE"
+    exit_code=1
+    break
+  fi
+  begin_function_key_watch "$wine_pid"
+  # One bounded activation per new game PID, including restart launches. This
+  # runs off the monitoring path and never keeps raising a running session.
+  if [[ "$IDENTITYV_USE_VIRTUAL_DESKTOP" != "1" && -x "$APP_CONTENTS/Resources/IdentityVGameActivator" ]]; then
+    /usr/bin/env -u DYLD_INSERT_LIBRARIES -u DYLD_FALLBACK_LIBRARY_PATH \
+      "$APP_CONTENTS/Resources/IdentityVGameActivator" --pid "$wine_pid" \
+      --expected-executable "$WINE_BIN" --timeout 90 >>"$LOG_FILE" 2>&1 &
+  fi
+  update_restart=0
+
+  while /bin/kill -0 "$wine_pid" >/dev/null 2>&1; do
+    append_low_frequency_sample "$wine_pid"
+    update_stall_watch "$wine_pid"
+    game_log_sig_now="$(/usr/bin/stat -f '%m:%z' "$GAME_DIR/log.txt" 2>/dev/null || print -r -- absent)"
+    if [[ "$game_log_sig_now" != "$game_log_sig_before" ]]; then
+      seen_log_activity=1
+    fi
+    if [[ "$IDENTITYV_AUTO_RESTART_ON_UPDATE" == "1" ]] && (( restart_count < IDENTITYV_RESTART_LIMIT )) && (( seen_log_activity == 1 )) && restart_marker_seen; then
+      print -r -- "update restart marker detected; restarting game once current Wine process is stopped" >>"$LOG_FILE"
+      stop_prefix_processes
+      /bin/kill "$wine_pid" >/dev/null 2>&1 || true
+      sleep 1
+      /bin/kill -9 "$wine_pid" >/dev/null 2>&1 || true
+      update_restart=1
+      break
+    fi
+    sleep 2
+  done
+
+  wait "$wine_pid"
+  exit_code=$?
+  if [[ "$IDENTITYV_AUTO_RESTART_ON_UPDATE" == "1" ]] && (( restart_count < IDENTITYV_RESTART_LIMIT )) && { (( update_restart == 1 )) || { (( seen_log_activity == 1 )) && restart_marker_seen; }; }; then
+    restart_count=$((restart_count + 1))
+    print -r -- "auto restart ${restart_count}/${IDENTITYV_RESTART_LIMIT} after game update marker, previous exit=$exit_code" >>"$LOG_FILE"
+    stop_prefix_processes
+    sleep 3
+    continue
+  fi
+
+  break
+done
+
+print -r -- "wine exited $exit_code at $(/bin/date '+%Y-%m-%d %H:%M:%S %Z')" >>"$LOG_FILE"
+exit "$exit_code"

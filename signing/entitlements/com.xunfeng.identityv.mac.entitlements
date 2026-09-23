@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 为什么需要：内嵌 IdentityVGameRunner.app 在"独立启动"时自己就是责任 App
+	     （其 Info.plist 已带 NSMicrophoneUsageDescription，理由见
+	     gameRunnerApp/tests/microphonePrivacyContract.test.command）。责任 App 若没有
+	     这个 entitlement，Hardened Runtime 下 TCC 会拒绝且不弹窗。
+	     常规路径的责任方是外层第五人格启动器，这里的声明保证独立启动同样可用。 -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

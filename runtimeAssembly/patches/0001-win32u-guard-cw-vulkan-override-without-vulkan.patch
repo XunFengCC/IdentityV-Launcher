@@ -1,0 +1,40 @@
+From: IdentityVOnMac runtime assembly
+Subject: [PATCH] win32u: preserve no-Vulkan guard around CodeWeavers override
+
+CodeWeavers 26.1 replaces Wine 11.0's SONAME_LIBVULKAN guard with a
+CX_LIBVULKAN override.  With --without-vulkan this leaves the macro undefined
+while win32u/vulkan.c is still compiled. Restore the upstream Wine 11.0
+no-Vulkan branch for that configuration; the CodeWeavers override remains
+unchanged when a Vulkan soname exists.
+
+---
+ dlls/win32u/vulkan.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/win32u/vulkan.c b/dlls/win32u/vulkan.c
+--- a/dlls/win32u/vulkan.c
++++ b/dlls/win32u/vulkan.c
+@@ -3002,18 +3002,23 @@ static void vulkan_init_once(void)
+     VkResult res;
+     const char *libvulkan, *graphics_backend;
+ 
++#ifdef SONAME_LIBVULKAN
+     /* CW HACK 25909: Allow specifying libvulkan */
+     if (!(libvulkan = getenv( "CX_LIBVULKAN" )) ||
+         !(graphics_backend = getenv( "CX_ACTIVE_GRAPHICS_BACKEND" )) ||
+         strcmp( graphics_backend, "wined3d" ))
+         libvulkan = SONAME_LIBVULKAN;
+     else
+         ERR( "Using %s\n", libvulkan );
+ 
+     if (!(vulkan_handle = dlopen( libvulkan, RTLD_NOW )))
+     {
+         ERR( "Failed to load %s: %s\n", libvulkan, dlerror() );
+         return;
+     }
++#else
++    ERR( "Wine was built without Vulkan support.\n" );
++    return;
++#endif
+ 
+ #define LOAD_FUNCPTR( f )                                                                          \

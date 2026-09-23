@@ -1,0 +1,25 @@
+From: IdentityV on Mac maintainers
+Subject: [PATCH] gdi32: shape valid surrogate pairs in ordinary LTR text
+
+CodeWeavers 26.1 / Wine 11.0 routes ordinary LTR supplementary characters
+around BIDI_Reorder's shaping path. DrawText then renders the two UTF-16
+code units separately. A valid pair needs shaping even without RTL text.
+Keep isolated surrogates and the paragraph direction unchanged.
+
+This does not add font fallback or full emoji sequence shaping. The selected
+font must cover the supplementary character. GetTextExtentExPointW shares
+this gate, so both ordinary measurement and output use the glyph cluster.
+
+--- a/dlls/gdi32/text.c
++++ b/dlls/gdi32/text.c
+@@ -409,7 +409,9 @@
+     {
+         if ((lpString[i] >= 0x900 && lpString[i] <= 0xfff) ||
+             (lpString[i] >= 0x1cd0 && lpString[i] <= 0x1cff) ||
+-            (lpString[i] >= 0xa840 && lpString[i] <= 0xa8ff))
++            (lpString[i] >= 0xa840 && lpString[i] <= 0xa8ff) ||
++            (lpString[i] >= 0xd800 && lpString[i] <= 0xdbff && i + 1 < uCount &&
++             lpString[i + 1] >= 0xdc00 && lpString[i + 1] <= 0xdfff))
+             is_complex = TRUE;
+     }
+ 

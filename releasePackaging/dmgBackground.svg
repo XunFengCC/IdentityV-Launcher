@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Source reference for the 660 × 360 Finder background. The packaged asset
+     is generated as vector PDF by makeDmgBackground.swift. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="360" viewBox="0 0 660 360">
+  <rect width="660" height="360" fill="#f5f5f7"/>
+  <path d="M280 145H380M365 130l15 15-15 15" fill="none" stroke="#8e8e93" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="330" y="286" text-anchor="middle" fill="#3c3c3f" font-size="14" font-family="PingFang SC, Hiragino Sans GB, sans-serif">请将左边的图标拖入右边的文件夹</text>
+</svg>

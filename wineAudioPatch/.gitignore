@@ -1,0 +1,2 @@
+# Large, reproducible local source/build trees. They are never deployment artifacts.
+build-*/

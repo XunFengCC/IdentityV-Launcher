@@ -1,0 +1,86 @@
+#!/bin/zsh
+#
+# Root-owned hand-off for the one game entry point which IDV Login invokes.
+# It deliberately accepts no caller-selected executable, user, environment, or
+# arguments.  The game itself always runs as the active macOS console user.
+set -euo pipefail
+
+readonly GAME_APP="/Applications/第五人格启动器.app/Contents/Helpers/IdentityVGameRunner.app"
+readonly GAME_RUNNER="$GAME_APP/Contents/MacOS/launchIdentityVRunner"
+readonly LOG_DIR="/var/log/IdentityVOnMac"
+readonly LOG_FILE="$LOG_DIR/launch-game-as-console-user.log"
+
+log() {
+  /bin/mkdir -p "$LOG_DIR"
+  /usr/sbin/chown root:wheel "$LOG_DIR" 2>/dev/null || true
+  /bin/chmod 755 "$LOG_DIR" 2>/dev/null || true
+  /usr/bin/printf '[%s] %s\n' "$(/bin/date '+%Y-%m-%d %H:%M:%S %Z')" "$*" >> "$LOG_FILE"
+}
+
+reject() {
+  log "rejected: $1"
+  /usr/bin/printf '第五人格启动请求无效：%s\n' "$1" >&2
+  exit 2
+}
+
+validate_arguments() {
+  case "$#" in
+    0)
+      ;;
+    2)
+      [[ "$1" == "--start_from_launcher=1" && "$2" == "--is_multi_start" ]] || \
+        reject "unsupported arguments"
+      ;;
+    *)
+      reject "unsupported argument count"
+      ;;
+  esac
+}
+
+resolve_console_user() {
+  local console_user console_uid account_uid account_home home_owner
+  console_user="$(/usr/bin/stat -f '%Su' /dev/console)"
+  console_uid="$(/usr/bin/stat -f '%u' /dev/console)"
+
+  [[ "$console_user" != "root" && "$console_user" != "loginwindow" && -n "$console_user" ]] || \
+    reject "no logged-in console user"
+  [[ "$console_uid" == <-> && "$console_uid" -ge 500 ]] || \
+    reject "console user UID is invalid"
+
+  account_uid="$(/usr/bin/dscl . -read "/Users/$console_user" UniqueID 2>/dev/null | /usr/bin/awk 'NR == 1 { print $2 }')"
+  account_home="$(/usr/bin/dscl . -read "/Users/$console_user" NFSHomeDirectory 2>/dev/null | /usr/bin/awk 'NR == 1 { print $2 }')"
+  [[ "$account_uid" == "$console_uid" ]] || reject "console account UID mismatch"
+  [[ "$account_home" == /* && -d "$account_home" ]] || reject "console home is invalid"
+  home_owner="$(/usr/bin/stat -f '%u' "$account_home")"
+  [[ "$home_owner" == "$console_uid" ]] || reject "console home ownership mismatch"
+
+  CONSOLE_USER="$console_user"
+  CONSOLE_UID="$console_uid"
+  CONSOLE_HOME="$account_home"
+}
+
+[[ "$(/usr/bin/id -u)" == "0" ]] || reject "must run as root"
+validate_arguments "$@"
+resolve_console_user
+[[ -x "$GAME_RUNNER" ]] || reject "fixed game runner is unavailable"
+
+# Do not inherit IDV Login's root environment. launchctl selects the GUI
+# bootstrap namespace and sudo changes credentials to that same console user.
+# The runner's ordinary entry point performs its own nohup dispatch before
+# Wine starts, so this bridge can return without a LaunchServices helper App
+# owning the game's foreground/focus lifecycle.
+if /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" /usr/bin/env -i \
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+  HOME="$CONSOLE_HOME" \
+  USER="$CONSOLE_USER" \
+  LOGNAME="$CONSOLE_USER" \
+  SHELL="/bin/zsh" \
+  LANG="C.UTF-8" \
+  LC_ALL="C.UTF-8" \
+  /bin/zsh "$GAME_RUNNER" --product mainland >> "$LOG_FILE" 2>&1 < /dev/null; then
+  log "direct runner hand-off accepted for console uid=$CONSOLE_UID args=$#"
+else
+  status="$?"
+  log "hand-off failed for console uid=$CONSOLE_UID status=$status args=$#"
+  exit "$status"
+fi

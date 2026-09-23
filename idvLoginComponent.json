@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "component": "idv-login",
+  "version": "6.3.0",
+  "releaseTag": "v6.3.0-stable",
+  "assetName": "idv-login-v6.3.0-stable-mac",
+  "byteSize": 197215760,
+  "downloadURL": "https://github.com/KKeygen/idv-login/releases/download/v6.3.0-stable/idv-login-v6.3.0-stable-mac",
+  "sha256": "8e63be76de37b4aeb8c6617d0d4c44a983d3d8e6d29c565c5074085286fe6889",
+  "sourceURL": "https://github.com/KKeygen/idv-login",
+  "releaseURL": "https://github.com/KKeygen/idv-login/releases/tag/v6.3.0-stable",
+  "license": "GPL-3.0"
+}

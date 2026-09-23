@@ -1,0 +1,5 @@
+#include "rebinder_filter_protocol.h"
+#include <assert.h>
+static void reach(idv_rebinder_filter_state_t*s,int n){uint32_t d;assert(idv_note_default(s,7,0));assert(idv_note_size(s));assert(idv_take_alias_data(s,&d));for(int i=0;i<n;i++)assert(idv_alias_accept(s,7,(idv_alias_event_t)i));}
+static void ok(idv_rebinder_filter_state_t*s){reach(s,0);for(int i=0;i<4;i++)assert(idv_alias_accept(s,7,(idv_alias_event_t)i));assert(s->state==IDV_IDLE);}
+int main(void){idv_rebinder_filter_state_t s={0};uint32_t d;assert(idv_note_default(&s,7,0));assert(idv_note_size(&s));assert(idv_take_data(&s,&d)&&d==7&&s.state==IDV_IDLE);ok(&s);ok(&s);for(int phase=0;phase<4;phase++)for(int event=0;event<4;event++)if(phase!=event){reach(&s,phase);assert(!idv_alias_accept(&s,7,(idv_alias_event_t)event)&&s.state==IDV_IDLE);}for(int phase=0;phase<4;phase++){reach(&s,phase);assert(!idv_alias_accept(&s,8,(idv_alias_event_t)phase)&&s.state==IDV_IDLE);}assert(!idv_note_size(&s));assert(!idv_note_default(&s,0,0));assert(!idv_take_data(&s,&d));idv_note_default_failure(&s);assert(s.state==IDV_EXPECT_SIZE_FAIL);return 0;}

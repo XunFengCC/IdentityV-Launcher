@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "selectedEngineId": "wine11",
+  "engines": {
+    "wine11": {
+      "gameRoot": { "volumeUUID": "00000000-0000-0000-0000-000000000000", "relativePath": "Games/IdentityV" },
+      "prefix": { "volumeUUID": "00000000-0000-0000-0000-000000000000", "relativePath": "Prefixes/IdentityV" }
+    }
+  }
+}

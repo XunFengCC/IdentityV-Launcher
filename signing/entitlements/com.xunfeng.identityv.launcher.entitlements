@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 为什么需要：启动器是游戏麦克风访问的**责任 App**（TCC 归属见 MicrophoneAuthorization.swift）。
+	     Hardened Runtime 下 tccd 要求责任 App 带此 entitlement，否则直接判定
+	     "Policy disallows prompt ... access denied"：既不弹窗也不给输入。
+	     2026-09-21 实测证据与验收命令见 ../../diagnostics/20260921DeveloperIDSigning.md。
+	     适用条件：只有负责录音/采集的 App 需要；子进程（Wine、辅助工具）从责任 App 获得该判定。 -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- 为什么需要：启动器的 IDV Login 安装/卸载走 /usr/bin/osascript 的
+	     `do shell script ... with administrator privileges`（ToolboxViewModel）。Hardened
+	     Runtime 下 AppleEvents 同样要求责任 App 带此 entitlement，否则 tccd 判
+	     "requires entitlement com.apple.security.automation.apple-events but it is missing"
+	     并拒绝，表现为点按钮后没有任何系统密码框。 -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "products": [
+    {
+      "id": "mainland",
+      "displayName": "国服",
+      "officialLandingPage": "https://id5.163.com/",
+      "resolverURL": "https://loadingbaycn.webapp.163.com/app/v1/download_client/windows/mkt-h55-official/url",
+      "allowedFinalHostSuffixes": ["gdl.netease.com"],
+      "expectedInstallerFilename": "DWRG_setup.exe",
+      "directDownload": {
+        "adapter": "netease-loadingbay-v1",
+        "distributionId": 73,
+        "gameId": "h55",
+        "metadataOrigin": "https://loadingbaycn.webapp.163.com",
+        "requestChannel": "mkt-h55"
+      }
+    },
+    {
+      "id": "global",
+      "displayName": "国际服",
+      "officialLandingPage": "https://www.identityvgame.com/",
+      "resolverURL": "https://api.loadingbay.com/app/v1/download_client/windows/mkt-h55-official/url",
+      "allowedFinalHostSuffixes": ["gdl.easebar.com"],
+      "expectedInstallerFilename": "Identity_V_setup.exe"
+    }
+  ]
+}

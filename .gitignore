@@ -1,0 +1,21 @@
+.DS_Store
+.build/
+**/.build/
+**/build/
+.venv/
+**/*.dSYM/
+local/
+perfCaptures/
+gptkReports/
+*.log
+*.trace
+*.profraw
+
+# These tools are rebuilt from the tracked source during a product build.
+denseMetrics/idv-dense-metrics
+runtimeBootstrap/IdentityVRuntimeBootstrap
+inputLatencyProbe/IdentityVInputLatencyProbe
+wineAudioPatch/build-26.1/
+
+# This directory is deliberate: the four signed, hash-locked releasePayloads
+# are tracked build inputs. Do not ignore runtimeBootstrap/releasePayloads/.

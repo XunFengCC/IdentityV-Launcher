@@ -25,7 +25,7 @@ flowchart LR
   E --> F[待最终审查的发行候选]
 ```
 
-玩家桌面入口是**第五人格启动器**；`gameRunnerApp/` 是被它内嵌的游戏进程模板。维护者工具箱是另一款 App。三个名称直接说明归属；两款 App 共享源码，但不共用 App 包或安装目标。
+旧工程的 `toolboxApp/` 曾是玩家启动器、`monitorApp/` 是维护者工具箱，`launcherApp/` 则是游戏 runner 模板；这些叫法来自产品演进，和今天的用途不再一一对应，所以迁仓时改成了上图的三个直白目录名。runner 是玩家启动器内嵌的小型启动包装 App，负责把启动命令交给 Wine，再启动游戏；“模板”指装配这个 App 的目录结构、脚本和资源，**不包含完整游戏**。实际启动链是：**玩家界面 → 内嵌 runner → Wine → 游戏**。维护者工具箱是另一款 App；两款 App 共享源码，但不共用 App 包或安装目标。
 
 ## 顶层文件夹
 
@@ -33,7 +33,7 @@ flowchart LR
 | --- | --- |
 | `playerLauncherApp/` | 玩家 App。`Sources/` 是界面和业务逻辑，`Resources/currentRoute.md` 是打进 App 的用户说明，`Assets/` 放图标，`Tests/` 放自检，`PromptHelper/` 和 `MicHelper/` 负责对应系统提示；`build/` 是可再生产物。 |
 | `maintenanceToolboxApp/` | 维护者 App。`Sources/` 是浮窗、采集和界面，`Assets/` 放图标；`build/` 是可再生产物。 |
-| `gameRunnerApp/` | 内嵌 runner 的两个历史模板 `IdentityV-Mac.app`、`IdentityV-AGTK.app` 及 `tests/`；模板的 `Contents/` 中有启动脚本、资源和受控预编译输入。`AGTK` 是历史名称，不代表当前主路线使用 Apple GPTK。 |
+| `gameRunnerApp/` | 内嵌 runner 的两个模板 `IdentityV-Mac.app`、`IdentityV-AGTK.app` 及 `tests/`；当前玩家 App 出货的是前者，后者保留供历史/开发测试。模板的 `Contents/` 中有启动脚本、资源和受控预编译输入；`AGTK` 是历史名称，不代表当前主路线使用 Apple GPTK。 |
 | `sharedDiagnostics/` | 两款 App 显式编译的健康检查、资源采样和高密度采集状态源码，包括 `DenseMonitoring.swift`。 |
 | `gameDownloader/` | 游戏下载、更新和文件校验逻辑。 |
 | `downloaderCoreBootstrap/` | 获取并校验网易下载核心的引导程序；不存放用户账号。 |

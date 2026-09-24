@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"debug/macho"
+	"debug/pe"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -46,6 +47,7 @@ type patchSpec struct {
 	SourceSHA256     string `json:"sourceSha256,omitempty"`
 	SHA256           string `json:"sha256"`
 	MachOMinOSAtMost string `json:"machOMinOSAtMost,omitempty"`
+	PEMachine        string `json:"peMachine,omitempty"`
 }
 type sourceSpec struct {
 	URL                  string   `json:"url"`
@@ -165,7 +167,7 @@ func validateManifest(m manifest) error {
 	if !allowed[strings.ToLower(u.Host)] {
 		return errors.New("initial source host not allowed")
 	}
-	if len(m.SourceVerificationFiles) == 0 || len(m.Patches) != 4 || len(m.FinalVerificationFiles) == 0 {
+	if len(m.SourceVerificationFiles) == 0 || len(m.Patches) < 4 || len(m.Patches) > 8 || len(m.FinalVerificationFiles) == 0 {
 		return errors.New("incomplete runtime manifest")
 	}
 	sourceSeen := map[string]bool{}
@@ -192,7 +194,10 @@ func validateManifest(m manifest) error {
 	for _, p := range m.Patches {
 		if !safeRelative(p.PatchRelativePath) || !safeRelative(p.TargetRelativePath) ||
 			(p.SourceSHA256 != "" && !hashRE.MatchString(p.SourceSHA256)) ||
-			!hashRE.MatchString(p.SHA256) || parseVersion(p.MachOMinOSAtMost) < 0 || patchTargets[p.TargetRelativePath] {
+			!hashRE.MatchString(p.SHA256) || patchTargets[p.TargetRelativePath] ||
+			((p.MachOMinOSAtMost == "") == (p.PEMachine == "")) ||
+			(p.MachOMinOSAtMost != "" && parseVersion(p.MachOMinOSAtMost) < 0) ||
+			(p.PEMachine != "" && p.PEMachine != "amd64") {
 			return errors.New("invalid patch specification")
 		}
 		patchTargets[p.TargetRelativePath] = true
@@ -317,6 +322,24 @@ func verifyMachOMinOS(path, limit string) error {
 	err = verifyMachOReader(f, info.Size(), limit)
 	if err != nil {
 		return fmt.Errorf("cannot inspect Mach-O %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+// The emoji GDI replacement is a Windows PE DLL. A Mach-O deployment target
+// does not exist for it; reject a wrong-architecture or non-PE payload before
+// publishing a runtime that would silently fall back to the old GDI path.
+func verifyPEMachine(path, machine string) error {
+	if machine != "amd64" {
+		return errors.New("unsupported PE machine")
+	}
+	f, err := pe.Open(path)
+	if err != nil {
+		return fmt.Errorf("cannot inspect PE %s: %w", filepath.Base(path), err)
+	}
+	defer f.Close()
+	if f.FileHeader.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || f.FileHeader.Characteristics&pe.IMAGE_FILE_DLL == 0 {
+		return fmt.Errorf("invalid x86_64 PE DLL: %s", filepath.Base(path))
 	}
 	return nil
 }
@@ -784,7 +807,11 @@ func install(ctx context.Context, m manifest, destinationRoot, patchRoot string,
 		if e = copyFileContext(ctx, from, to); e != nil {
 			return e
 		}
-		if e = verifyMachOMinOS(to, p.MachOMinOSAtMost); e != nil {
+		if p.MachOMinOSAtMost != "" {
+			if e = verifyMachOMinOS(to, p.MachOMinOSAtMost); e != nil {
+				return e
+			}
+		} else if e = verifyPEMachine(to, p.PEMachine); e != nil {
 			return e
 		}
 	}

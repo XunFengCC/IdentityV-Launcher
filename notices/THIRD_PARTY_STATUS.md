@@ -93,6 +93,14 @@ GStreamer 的上游许可入口是 [source COPYING](https://gitlab.freedesktop.o
 - 同一候选的 App/材料条目检查未见 `idv-login.raw`、`DWRG.dmg`、已列禁入的 Windows payload 或基础 Wine/GStreamer 闭包；当前出货仅四枚 hash 锁定的自建 runtime 替换文件。DXMT/MoltenVK 和 GStreamer 的完整基础闭包因此不在**本项目包**的再分发范围；若最终 App/DMG 或材料 ZIP 实际增加它们，上述逐包 BOM、许可、NOTICE 与对应源码门立即适用。
 - 最终发行前仍要用**最终** App/DMG、材料 ZIP、项目源码归档和拟推 Git refs 重新核对：实际组件/版本与本页及 manifest 相符；Go helper 的最终依赖图与 notice 一致；每项随包许可文本确实存在且源码与二进制对应；禁入载荷不存在；公开介绍不误示支持、背书或授权。只改本页也会改变下一次 `ReleaseMaterials.zip` 的字节与 SHA-256，因为生成器会复制它；旧 ZIP 不能宣称包含新说明。
 
+## 未封版的 emoji 源码构建候选
+
+2026-09-25 起，源码主干默认选择 `r1-emoji2`；公开 `v1.0.0-rc.1` tag、安装包和下载页仍固定原 r1。以下载荷只进入未来源码构建，不追溯改变 RC1。
+
+- `gdi32.dll` 是从 CodeWeavers 26.1 对应 Wine 源码应用 `wineEmojiPatch/patches/` 中两份补丁后构建的 PE AMD64 文件。Wine 代码适用 LGPL-2.1-or-later；该 DLL 的对应源码、补丁和构建说明应与下次含此载荷的发行材料一起提供。二进制 SHA-256 为 `3aa45d33ab949a188f3249d0a6ecdb7793f141eefa10d631e404dfe78464de48`。
+- `IdentityV-Emoji-CJK.ttf` 是 [Noto Sans CJK SC 2.004](https://github.com/notofonts/noto-cjk/tree/Sans2.004) 与 [Noto Emoji](https://github.com/googlefonts/noto-emoji) 的字体派生物，字体均按 SIL Open Font License 1.1（OFL-1.1）提供。Noto Sans CJK SC 版权声明为 `Copyright 2014-2021 Adobe`，保留名称为 `Source`；Noto Emoji 声明为 `Copyright 2013 Google LLC`。完整许可原文及来源声明随仓保存在 `wineEmojiPatch/licenses/Noto-CJK-OFL-1.1.txt` 和 `Noto-Emoji-OFL-1.1.txt`；源码构建会把两份文件放入 App 的 `ThirdParty` 目录。未来公开材料还要收录这些声明，并保留字体修改/来源说明。
+- 现有 `releaseMaterialsManifest.tsv` 和生成器锁定的是 RC1 材料，**不会**自动把新的 Wine 补丁、Noto OFL 声明和对应源码加入下次发行材料。决定封包时必须单独更新材料清单、生成器和最终材料包，再以实际 App/DMG/源码归档复核；本次源码合并本身不构成 RC2 或发行授权。
+
 ## RC1 生成入口
 
 [`prepareReleaseNotices.command`](prepareReleaseNotices.command) 与

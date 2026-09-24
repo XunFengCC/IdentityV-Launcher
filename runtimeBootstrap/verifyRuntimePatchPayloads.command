@@ -1,7 +1,8 @@
 #!/bin/zsh
-# Verify that the four byte-locked runtime patches still match the manifest.
+# Verify that byte-locked runtime patches still match the manifest.
 # These Mach-O files are resources copied into a downloaded runtime; signing
 # them again after the manifest is generated changes their bytes and must fail.
+# The emoji GDI replacement is a PE AMD64 DLL; bootstrap verifies its format.
 set -euo pipefail
 
 (( $# == 1 )) || { print -u2 -- "用法：${0:t} APP_PATH"; exit 64; }
@@ -26,7 +27,7 @@ integer count=0
 while IFS=$'\t' read -r relative expected_hash; do
   [[ -n "$relative" && -n "$expected_hash" ]] || continue
   case "$relative" in
-    winemac.so|libgmp.10.dylib|libpcre2-8.0.dylib|libzstd.1.dylib) ;;
+    winemac.so|libgmp.10.dylib|libpcre2-8.0.dylib|libzstd.1.dylib|gdi32.dll) ;;
     *) print -u2 -- "unexpected runtime patch in manifest: $relative"; exit 65 ;;
   esac
   [[ -z "${seen[$relative]:-}" ]] || { print -u2 -- "duplicate runtime patch: $relative"; exit 65; }
@@ -45,8 +46,8 @@ while IFS=$'\t' read -r relative expected_hash; do
   (( count += 1 ))
 done <<< "$(print -r -- "$manifest_json" | /usr/bin/jq -r '.patches[] | [.patchRelativePath, .sha256] | @tsv')"
 
-(( count == 4 )) || { print -u2 -- "runtime patch count mismatch: $count"; exit 65; }
-for required in winemac.so libgmp.10.dylib libpcre2-8.0.dylib libzstd.1.dylib; do
+(( count == 5 )) || { print -u2 -- "runtime patch count mismatch: $count"; exit 65; }
+for required in winemac.so libgmp.10.dylib libpcre2-8.0.dylib libzstd.1.dylib gdi32.dll; do
   [[ "${seen[$required]:-}" == 1 ]] || { print -u2 -- "missing runtime patch: $required"; exit 65; }
 done
 

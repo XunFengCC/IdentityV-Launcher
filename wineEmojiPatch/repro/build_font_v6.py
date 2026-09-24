@@ -14,6 +14,9 @@ import subprocess
 
 from fontTools.ttLib import TTFont
 from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+from fontTools.pens.transformPen import TransformPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.pens.recordingPen import DecomposingRecordingPen
 
 HERE = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description='Build the local monochrome RGI emoji test font.')
@@ -24,6 +27,7 @@ parser.add_argument('--output-font', type=Path, required=True)
 parser.add_argument('--work-dir', type=Path, required=True)
 parser.add_argument('--report', type=Path, required=True)
 parser.add_argument('--family', default='IdentityV Local Emoji Test')
+parser.add_argument('--postscript-name', default='IdentityVEmojiCompositeV4-Regular')
 parser.add_argument('--head-modified', type=int, default=3871839578,
                     help='TrueType epoch timestamp; default reproduces the audited v6 binary.')
 args = parser.parse_args()
@@ -97,16 +101,28 @@ base_map, noto_map = base.getBestCmap(), noto.getBestCmap()
 base_glyf, noto_glyf = base['glyf'], noto['glyf']
 base_hmtx, noto_hmtx = base['hmtx'], noto['hmtx']
 base_order, noto_order = base.getGlyphOrder(), noto.getGlyphOrder()
+source_scale = base['head'].unitsPerEm / noto['head'].unitsPerEm
+source_glyph_set = noto.getGlyphSet()
+
+def imported_glyph(name):
+    if source_scale == 1:
+        return deepcopy(noto_glyf[name]), noto_hmtx.metrics[name]
+    pen = TTGlyphPen(None)
+    recording = DecomposingRecordingPen(source_glyph_set)
+    source_glyph_set[name].draw(recording)
+    recording.replay(TransformPen(pen, (source_scale, 0, 0, source_scale, 0, 0)))
+    advance, lsb = noto_hmtx.metrics[name]
+    return pen.glyph(), (round(advance * source_scale), round(lsb * source_scale))
 
 def copy_glyph(name):
     if name in base_glyf.glyphs:
         return name
-    glyph = deepcopy(noto_glyf[name])
-    if glyph.isComposite():
+    glyph, metrics = imported_glyph(name)
+    if source_scale == 1 and glyph.isComposite():
         for component in glyph.components:
             component.glyphName = copy_glyph(component.glyphName)
     base_glyf.glyphs[name] = glyph
-    base_hmtx.metrics[name] = noto_hmtx.metrics[name]
+    base_hmtx.metrics[name] = metrics
     base_order.append(name)
     return name
 
@@ -114,12 +130,12 @@ def copy_output(name):
     target = 'notoEmojiLig_' + name
     if target in base_glyf.glyphs:
         return target
-    glyph = deepcopy(noto_glyf[name])
-    if glyph.isComposite():
+    glyph, metrics = imported_glyph(name)
+    if source_scale == 1 and glyph.isComposite():
         for component in glyph.components:
             component.glyphName = copy_glyph(component.glyphName)
     base_glyf.glyphs[target] = glyph
-    base_hmtx.metrics[target] = noto_hmtx.metrics[name]
+    base_hmtx.metrics[target] = metrics
     base_order.append(target)
     return target
 
@@ -174,7 +190,7 @@ for record in base['name'].names:
     elif record.nameID == 2:
         record.string = 'Regular'.encode('utf-16-be') if record.isUnicode() else b'Regular'
     elif record.nameID == 6:
-        value = 'IdentityVEmojiCompositeV4-Regular'
+        value = args.postscript_name
         record.string = value.encode('utf-16-be') if record.isUnicode() else value.encode('mac_roman')
 
 OUT.parent.mkdir(parents=True, exist_ok=True)

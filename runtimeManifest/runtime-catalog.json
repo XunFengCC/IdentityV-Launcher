@@ -118,6 +118,11 @@
     },
     "wine11-codeweavers-26_1-dxmt-0_80-macos15-alpha1-r1": {
       "launchProfile": "codeweavers-wine-release-dxmt",
+      "candidateSelection": {
+        "channel": "previous-product-default",
+        "productDefault": false,
+        "runtimeVersion": "wine11-codeweavers-26.1-dxmt-0.80-macos15-alpha1-r1"
+      },
       "capabilities": {
         "coreAudioCapturePolicy": "rebinder-filter-required",
         "d3dcompiler47Policy": "verified-game-native-when-manifest-present"
@@ -283,15 +288,16 @@
         "reference": "runtimeBootstrap/runtime-manifest.json"
       },
       "fontConfiguration": {
-        "cjkFamily": "IdentityV Local Emoji Test",
-        "cjkFilename": "IdentityV-Local-Emoji-Test.ttf",
-        "cjkSha256": "f782b20e17155e349347ca83fbcb99dea658b9614e5504c64b97faef13e336e8"
+        "cjkFamily": "IdentityV Emoji CJK",
+        "cjkFilename": "IdentityV-Emoji-CJK.ttf",
+        "cjkSha256": "c002488492344453723dc491ecbe2646018f94a3060a8d0cb5829ef8b4d0d45b"
       },
       "candidateSelection": {
-        "channel": "maintainer-emoji-candidate",
-        "productDefault": false,
+        "channel": "source-build-default",
+        "productDefault": true,
+        "runtimeVersion": "wine11-codeweavers-26.1-dxmt-0.80-macos15-alpha1-r1-emoji2",
         "fallbackEngineId": "wine11-codeweavers-26_1-dxmt-0_80-macos15-alpha1-r1",
-        "activation": "explicit-maintainer-selection-only"
+        "activation": "source-build-default"
       }
     }
   }

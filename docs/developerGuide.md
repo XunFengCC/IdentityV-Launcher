@@ -13,7 +13,7 @@
 1. 先从界面所属 App 的 README 与 `Sources/` 找调用，再沿上面的模块关系定位实现；若跨两款 App，确认是明确共享的行为再放入 `sharedDiagnostics/`。先看对应测试与[工程取舍](engineeringDecisions.md)，避免只复制旧兼容分支。
 2. 在当前用户游戏/App 未依赖的隔离工作副本中修改。根入口 `./devIterate.command launcher build`、`./devIterate.command toolbox build` 只生成候选；玩家启动器构建还会更新仓内 runner 模板、签名输入与可再生输出，不能在有运行中的同一路径候选时原地覆盖。`keyboard build` 仅构建键盘组件，不产生可安装 App。需构建工具以各脚本的实际前置为准；主要使用 macOS SDK/Xcode 命令行工具，玩家构建还调用 Go 与若干本仓检查。
 3. 优先跑改动模块自己的合约测试，再对受影响 App 做完整构建与签名树/部署目标检查。构建脚本会调用多项自检；通过只证明对应静态与候选条件。`./devIterate.command … run` 会打开候选，`… install` 或 `./installIdentityVApps.command` 会替换 `/Applications` 并备份旧 App，这两步属于明确安排的真实运行/安装验收，不能和 `build` 混用。
-4. 若更改 App/runner 内容或签名输入，发行候选需从确切源码提交重建、签名、公证并重算对应源码与材料哈希；纯文档整理不回写已签 App。版本及对用户的变化同步[变更记录](../CHANGELOG.md)，原因、失败路径和适用边界留在相关测试、代码注释或工程说明。结构、入口或脚本效果改变时，同步[项目地图](../projectMap.md)；普通函数细节不必改地图。
+4. 若更改 App/runner 内容或签名输入，发行候选需从干净的确切源码提交重建、签名、公证并重算对应源码与材料哈希。构建把提交、构建前干净状态、发行号与实际默认 runtime 写入 App 的 `build-provenance.json`；封包器逐项核对并拒绝已公开的同名版本。纯文档整理不回写已签 App。版本及对用户的变化同步[变更记录](../CHANGELOG.md)，原因、失败路径和适用边界留在相关测试、代码注释或工程说明。结构、入口或脚本效果改变时，同步[项目地图](../projectMap.md)；普通函数细节不必改地图。
 
 ## 入口和兼容边界
 

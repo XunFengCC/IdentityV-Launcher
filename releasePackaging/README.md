@@ -4,14 +4,14 @@
 
 ## 版本与当前实物
 
-版本取自 App 的 `IdentityVReleaseVersion`，当前目标是 **1.0.0-rc.1**；`CFBundleVersion` 当前为 `1`。[变更记录](../CHANGELOG.md)给出候选相对当前实际验收的用户/维护者变化与未发布边界。脚本文件名 `buildAlpha1Preview.command` 为兼容既有调用保留的历史名称，不决定版本号或签名方式。实际文件名从 App 元数据产生：
+版本取自 App 的 `IdentityVReleaseVersion`。**1.0.0-rc.1 已于 2026-09-23 公开发布**；源码当前仍保留这个号码用于日常构建，封包器会拒绝以这个已用号码再次发行。下一次封包先确定范围，再把 `IdentityVReleaseVersion` 增至新候选号并从干净提交重建。[变更记录](../CHANGELOG.md)说明已发布内容与未决问题。脚本文件名 `buildAlpha1Preview.command` 为兼容既有调用保留的历史名称，不决定版本号或签名方式。以下是 RC1 已发布物的文件名示例：
 
 - `第五人格启动器-1.0.0-rc.1.dmg`
 - `第五人格启动器-1.0.0-rc.1-ReleaseMaterials.zip`
 - `第五人格启动器-1.0.0-rc.1-ProjectSource.zip`（与最终候选相配的项目源码；单独归档）
 - `SHA256SUMS.txt`
 
-`/Applications` 中的已装 App、工作树 `build/` 里的候选和某次 DMG 是三个不同对象；版本号相同也不能共享签名、公证和源码对应结论。迁入独立仓后已从干净克隆重建两款 App，并对玩家 App 形成通过签名、公证和 Gatekeeper 的新本地候选；对应源码 ZIP 从新仓明确提交归档并复验。旧私人工作区的另一份 RC1 候选只作字节/行为对照，不能冒充本仓新构建或已公开发布物。干净首次安装、macOS 15 实机和国际服登录保持仍待验收。
+`/Applications` 中的已装 App、工作树 `build/` 里的候选和公开 DMG 是三个不同对象；版本号相同也不能共享签名、公证和源码对应结论。RC1 的公开标签固定在 `3bac291`。公开后的 emoji 回归与语音消息破音已登记，不能把开发中的候选字体或 runtime 当作已发布修复。干净首次安装、macOS 15 实机和国际服登录的验收状态仍应单独核对。
 
 ## 生成步骤
 
@@ -25,7 +25,7 @@
 
 第三方材料生成器仅在 `notices/.build/` 重建忽略的中间产物；封包器在 Developer ID 模式下对 staging App 签名、公证和 staple，再对 DMG 自身签名、公证和 staple。两者分别按适合的 Gatekeeper 类型验收。公证 profile 从 `IDENTITYV_NOTARY_PROFILE` 读取，凭据只放在钥匙串。构建模式为 `auto` 时优先选用可用的 Developer ID，缺 profile 会直接失败。若明确选择 ad-hoc 或本地开发签名，生成物不是普通用户可直接信任的正式候选，需清楚标记为内部测试。
 
-若 App 尚未构建，使用 `./releasePackaging/buildAlpha1Preview.command --rebuild`；该选项调用玩家启动器构建脚本，会改写 `playerLauncherApp/build/第五人格启动器.app`，并按构建脚本实际设置使用签名身份。若需保留默认构建，可先由调用方在隔离目录完成构建，再设置绝对路径 `IDENTITYV_BUILD_ROOT=/绝对构建目录`；封包器会从同一目录读取 App。`--output /绝对输出目录` 可将最终产物及暂存区放到指定位置。省略 `--rebuild` 表示明确封装该路径里现成的 App，不会自动判断它是否为最新源码构建。
+若 App 尚未构建，使用 `./releasePackaging/buildAlpha1Preview.command --rebuild`；该选项调用玩家启动器构建脚本，会改写 `playerLauncherApp/build/第五人格启动器.app`，并按构建脚本实际设置使用签名身份。若需保留默认构建，可先由调用方在隔离目录完成构建，再设置绝对路径 `IDENTITYV_BUILD_ROOT=/绝对构建目录`；封包器会从同一目录读取 App。`--output /绝对输出目录` 可将最终产物及暂存区放到指定位置。省略 `--rebuild` 时，封包器仍会核对 App 内 `build-provenance.json` 的源码提交、构建前干净状态、包内 manifest/catalog/Info 哈希、当前源码资源和唯一默认运行时；缺失或不一致就拒绝封包。
 
 首次使用时 `preparePackagingEnvironment.command` 只创建本目录被忽略的 `.venv`，固定安装 `dmgbuild 1.6.7`，不改系统 Python。封包用隔离 staging、禁入内容扫描、运行时补丁哈希校验、签名树验证、麦克风用途声明契约、最高 macOS 部署目标审计和只读 DMG 挂载复验。DMG 可见布局是启动器 App 与指向 `/Applications` 的拖放入口，另带 Finder 背景元数据；游戏、基础 Wine runtime、`DWRG.dmg`、网易下载核心及 `idv-login` 二进制不得进入 App/DMG。
 

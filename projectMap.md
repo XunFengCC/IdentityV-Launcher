@@ -53,7 +53,7 @@ flowchart LR
 | `testFixtures/` | 无账号、无真实用户现场的合成测试样本。 |
 | `notices/` | 第三方许可、来源及对应源码材料生成入口；`.build/` 是生成目录。 |
 | `signing/` | entitlements、签名/公证脚本及候选第一方 ID 的只读验证；证书私钥留在系统安全存储，不进入 Git。 |
-| `releasePackaging/` | 版本约定、DMG 封包脚本和发行说明；`build/`、`.venv/` 是本机生成目录。 |
+| `releasePackaging/` | 版本约定、DMG 封包、`releaseIdentity.py` 包内身份核对及发行说明；`build/`、`.venv/` 是本机生成目录。 |
 | `docs/` | 可公开的开发者框架、原因、取舍、历史命令和验证边界；从 `developerGuide.md` 进入，`engineeringDecisions.md` 解释工程组织，`firstPartyIdentity.md` 记录身份与旧安装兼容。 |
 | `local/` | 本机忽略的隔离候选与临时验证文件；不属于公开源码或已安装版。 |
 | `.build/` | 构建工具自动生成的中间文件，可再生且不进入 Git。 |
@@ -78,7 +78,7 @@ flowchart LR
 | 文件 | 执行后的主要作用 |
 | --- | --- |
 | `devIterate.command` | 日常总入口：`build` 生成候选，`run` 构建并打开候选，`install` 构建并更新 `/Applications`。 |
-| `buildPlayerLauncher.command` | 构建玩家启动器，默认写 `playerLauncherApp/build/`，自身不更新 `/Applications`。 |
+| `buildPlayerLauncher.command` | 构建玩家启动器并记录源码提交、默认 runtime 与资源哈希，默认写 `playerLauncherApp/build/`，自身不更新 `/Applications`。 |
 | `buildMaintenanceToolbox.command` | 构建维护者工具箱到 `maintenanceToolboxApp/build/`，自身不更新 `/Applications`。 |
 | `buildGameRunner.command` | 构建/装配内嵌游戏 runner 模板。 |
 | `buildIdentityVGameActivator.command` | 构建游戏前台激活辅助程序。 |

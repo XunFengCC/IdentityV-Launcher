@@ -44,6 +44,8 @@ fi
 [[ -d "$source_app" ]] || { print -u2 -- "Missing built app: $source_app"; print -u2 -- "Run with --rebuild or build it first."; exit 1; }
 release_version="$(/usr/libexec/PlistBuddy -c 'Print IdentityVReleaseVersion' "$source_app/Contents/Info.plist")"
 [[ "$release_version" == [0-9]* && "$release_version" != *[^a-zA-Z0-9.-]* ]] || { print -u2 -- "发行版本格式无效。"; exit 1; }
+/usr/bin/python3 "$project_root/releasePackaging/releaseIdentity.py" verify \
+  --repo "$project_root" --app "$source_app"
 release_name="第五人格启动器-$release_version"
 materials_name="$release_name-ReleaseMaterials"
 /bin/zsh "$project_root/gameRunnerApp/tests/microphonePrivacyContract.test.command" "$source_app"

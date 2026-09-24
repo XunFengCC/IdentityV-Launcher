@@ -2,6 +2,12 @@
 set -euo pipefail
 
 PROJECT_ROOT="${0:A:h}"
+BUILD_SOURCE_COMMIT="$(/usr/bin/git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || true)"
+BUILD_SOURCE_CLEAN=false
+if [[ ${#BUILD_SOURCE_COMMIT} -eq 40 && "$BUILD_SOURCE_COMMIT" != *[^0-9a-f]* && -z "$(/usr/bin/git -C "$PROJECT_ROOT" status --porcelain --untracked-files=normal 2>/dev/null || true)" ]]; then
+  BUILD_SOURCE_CLEAN=true
+fi
+[[ ${#BUILD_SOURCE_COMMIT} -eq 40 ]] || BUILD_SOURCE_COMMIT=0000000000000000000000000000000000000000
 SOURCE_ROOT="$PROJECT_ROOT/playerLauncherApp"
 BUILD_ROOT="${IDENTITYV_BUILD_ROOT:-$SOURCE_ROOT/build}"
 [[ "$BUILD_ROOT" == /* ]] || { print -u2 -- "IDENTITYV_BUILD_ROOT 必须是绝对路径。"; exit 64; }
@@ -158,7 +164,7 @@ if [[ ! -f "$RUNTIME_BOOTSTRAP_MANIFEST_SOURCE" || ! -f "$RUNTIME_CATALOG_SOURCE
   print -u2 -- "请先运行 runtimeBootstrap/stageRuntimePatchPayloads.command。"
   exit 1
 fi
-for patch in winemac.so libgmp.10.dylib libpcre2-8.0.dylib libzstd.1.dylib; do
+for patch in winemac.so libgmp.10.dylib libpcre2-8.0.dylib libzstd.1.dylib gdi32.dll; do
   [[ -f "$RUNTIME_PATCH_ROOT/$patch" && ! -L "$RUNTIME_PATCH_ROOT/$patch" ]] || { print -u2 -- "缺少 runtime patch：$patch"; exit 1; }
 done
 if [[ ! -f "$CORE_COMPONENT_MANIFEST_SOURCE" || ! -f "$IDV_LOGIN_COMPONENT_MANIFEST_SOURCE" || ! -f "$DIAGNOSTIC_EXPORTER_SOURCE" ]]; then
@@ -272,6 +278,21 @@ fi
   "$IDV_LOGIN_PAYLOAD_DESTINATION/uninstallIdentityVPreview.command"
 /bin/chmod 644 "$IDV_LOGIN_PAYLOAD_DESTINATION/idvLoginComponent.json" "$IDV_LOGIN_PAYLOAD_DESTINATION/migrateIdvLoginHotfixState.py"
 /usr/bin/ditto "$RUNNER_SOURCE_APP" "$RUNNER_DESTINATION_APP"
+# The catalog decides whether this App actually needs the redistributable
+# emoji font. Keep the payload and both OFL notices beside the selected runner
+# instead of treating the mere presence of an emoji candidate as a release.
+DEFAULT_FONT_NAME="$(/usr/bin/jq -r '[.engines[] | select(.candidateSelection.productDefault == true) | .fontConfiguration.cjkFilename // empty] | first // empty' "$RUNTIME_CATALOG_SOURCE")"
+if [[ -n "$DEFAULT_FONT_NAME" ]]; then
+  [[ "$DEFAULT_FONT_NAME" == IdentityV-Emoji-CJK.ttf ]] || { print -u2 -- "未知的默认字体载荷：$DEFAULT_FONT_NAME"; exit 65; }
+  DEFAULT_FONT_HASH="$(/usr/bin/jq -r '[.engines[] | select(.candidateSelection.productDefault == true) | .fontConfiguration.cjkSha256 // empty] | first // empty' "$RUNTIME_CATALOG_SOURCE")"
+  DEFAULT_FONT_SOURCE="$PROJECT_ROOT/wineEmojiPatch/releasePayloads/$DEFAULT_FONT_NAME"
+  [[ -f "$DEFAULT_FONT_SOURCE" && ! -L "$DEFAULT_FONT_SOURCE" ]] || { print -u2 -- "缺少默认字体载荷。"; exit 66; }
+  [[ "$(/usr/bin/shasum -a 256 "$DEFAULT_FONT_SOURCE" | /usr/bin/awk '{print $1}')" == "$DEFAULT_FONT_HASH" ]] || { print -u2 -- "默认字体与 catalog 哈希不符。"; exit 65; }
+  /bin/mkdir -p "$RUNNER_DESTINATION_APP/Contents/Resources/Fonts"
+  /usr/bin/install -m 444 "$DEFAULT_FONT_SOURCE" "$RUNNER_DESTINATION_APP/Contents/Resources/Fonts/$DEFAULT_FONT_NAME"
+  /usr/bin/install -m 444 "$PROJECT_ROOT/wineEmojiPatch/licenses/Noto-CJK-OFL-1.1.txt" "$THIRD_PARTY_DIR/Noto-CJK-OFL-1.1.txt"
+  /usr/bin/install -m 444 "$PROJECT_ROOT/wineEmojiPatch/licenses/Noto-Emoji-OFL-1.1.txt" "$THIRD_PARTY_DIR/Noto-Emoji-OFL-1.1.txt"
+fi
 # Always compile the bounded foreground helper from this source revision.
 /usr/bin/xcrun swiftc -O -target arm64-apple-macos14.0 -sdk "$SDK_PATH" \
   -framework AppKit -framework CoreGraphics "$PROJECT_ROOT/gameActivator/main.swift" \
@@ -387,6 +408,12 @@ fi
 /usr/bin/codesign --force --sign - \
   --identifier com.fengyin.identityv.launcher.idv-login-downloader \
   "$IDV_LOGIN_DOWNLOADER_DESTINATION"
+# Build provenance records the source state before generated runner resources
+# are refreshed. Release packaging refuses a dirty/stale build and verifies
+# the selected engine against the bundled runtime manifest and catalog.
+/usr/bin/python3 "$PROJECT_ROOT/releasePackaging/releaseIdentity.py" stamp \
+  --repo "$PROJECT_ROOT" --app "$APP_PATH" \
+  --source-commit "$BUILD_SOURCE_COMMIT" --source-clean "$BUILD_SOURCE_CLEAN"
 # 由内到外签整个启动器 bundle（含内嵌 IdentityVGameRunner.app 与全部辅助二进制，
 # identifier 沿用上面指定的值）。不再用 --deep：它只把外层选项套一遍，内层仍会是
 # ad-hoc，产不出可公证的 Developer ID 树。

@@ -207,7 +207,9 @@ private struct LegacyRuntimeCatalogEngine: Decodable {
     let executablePaths: LegacyRuntimeExecutablePaths
     let launchProfile: String
     let verificationFiles: [String: LegacyRuntimeVerificationFile]
+    let candidateSelection: LegacyRuntimeCandidateSelection?
 }
+private struct LegacyRuntimeCandidateSelection: Decodable { let productDefault: Bool? }
 /// Runtime acquisition is independent of either game's installation.  This
 /// binding is deliberately insufficient to launch a game: the runner still
 /// requires a complete game/prefix binding before it starts Wine.
@@ -1761,7 +1763,22 @@ private func runtimeCatalogLocation() -> URL {
     return executableDirectory().appendingPathComponent("runtime-catalog.json")
 }
 
-private let alpha1RuntimeEngineID = "wine11-codeweavers-26_1-dxmt-0_80-macos15-alpha1-r1"
+/// The catalog names the one runtime shipped as the product default. Keep the
+/// selection beside its hashes: a candidate entry alone must never silently
+/// change what the player actually launches.
+private func productRuntimeEngineID() throws -> String {
+    guard let data = try? Data(contentsOf: runtimeCatalogLocation()),
+          let catalog = try? JSONDecoder().decode(LegacyRuntimeCatalog.self, from: data),
+          catalog.schemaVersion == 1 else {
+        throw ManagerError.message("Wine 运行环境清单缺失或格式无效。")
+    }
+    let defaults = catalog.engines.filter { $0.value.candidateSelection?.productDefault == true }
+    guard defaults.count == 1, let engineID = defaults.first?.key,
+          engineID.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else {
+        throw ManagerError.message("Wine 运行环境清单必须明确指定唯一的发行默认版本。")
+    }
+    return engineID
+}
 
 private func verifiedCatalogRuntime(engineID: String, runtime: URL) throws -> (wine: URL, environment: [String: String]) {
     guard let catalogData = try? Data(contentsOf: runtimeCatalogLocation()),
@@ -1801,10 +1818,11 @@ private func verifiedCatalogRuntime(engineID: String, runtime: URL) throws -> (w
 /// Resolve only the selected runtime and re-verify every critical catalogue
 /// hash.  Direct installs never borrow an old game's runtime/prefix binding.
 private func selectedRuntimeForDirectInstall() throws -> (runtime: URL, wine: URL, environment: [String: String]) {
+    let expectedEngineID = try productRuntimeEngineID()
     guard let data = try? Data(contentsOf: runtimeBindingURL),
           let binding = try? JSONDecoder().decode(RuntimeBinding.self, from: data),
           binding.schemaVersion == 1,
-          binding.selectedEngineId == alpha1RuntimeEngineID,
+          binding.selectedEngineId == expectedEngineID,
           let runtime = resolve(binding.runtime) else {
         throw ManagerError.message("Wine 运行时尚未完成准备或校验失败。")
     }
@@ -1895,6 +1913,7 @@ private func runRuntimeBootstrapStreaming(_ bootstrap: URL, manifest: URL, desti
 /// interrupted or rejected.
 private func ensureRuntime(reporter: DownloadProgressReporter) throws -> (runtime: URL, wine: URL, environment: [String: String]) {
     if let existing = try? selectedRuntimeForDirectInstall() { return existing }
+    let expectedEngineID = try productRuntimeEngineID()
     let bootstrap = executableDirectory().appendingPathComponent("IdentityVRuntimeBootstrap")
     let manifest = executableDirectory().appendingPathComponent("runtime-manifest.json")
     let patches = executableDirectory().appendingPathComponent("RuntimePatches")
@@ -1906,7 +1925,7 @@ private func ensureRuntime(reporter: DownloadProgressReporter) throws -> (runtim
     try ensureSupportDirectory()
     try runRuntimeBootstrapStreaming(bootstrap, manifest: manifest, destination: componentRoot, patches: patches, reporter: reporter)
     let current = componentRoot.appendingPathComponent("current").resolvingSymlinksInPath().standardizedFileURL
-    let binding = RuntimeBinding(schemaVersion: 1, selectedEngineId: alpha1RuntimeEngineID, runtime: try makeLocation(current))
+    let binding = RuntimeBinding(schemaVersion: 1, selectedEngineId: expectedEngineID, runtime: try makeLocation(current))
     try saveRuntimeBinding(binding)
     let verified = try selectedRuntimeForDirectInstall()
     reporter.emit(event: "progress", phase: "runtime", bytesWritten: 1, totalBytesExpected: 1, force: true)
@@ -1931,10 +1950,11 @@ private func publishMainlandRunnerBinding(gameRoot: ManagedLocation, prefix: Man
     guard !gameIsRunning() else {
         throw ManagerError.message("游戏仍在运行，不能切换其启动绑定。请结束游戏后重试。")
     }
+    let expectedEngineID = try productRuntimeEngineID()
     guard let data = try? Data(contentsOf: runtimeBindingURL),
           let runtimeBinding = try? JSONDecoder().decode(RuntimeBinding.self, from: data),
           runtimeBinding.schemaVersion == 1,
-          runtimeBinding.selectedEngineId == alpha1RuntimeEngineID,
+          runtimeBinding.selectedEngineId == expectedEngineID,
           runtimeIsAvailable() else {
         throw ManagerError.message("当前 Wine runtime 绑定不可用；未发布游戏启动配置。")
     }

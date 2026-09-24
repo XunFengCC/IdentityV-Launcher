@@ -26,6 +26,21 @@ emoji-zwj-sequences.txt  9a76a03dcacfcd8f9bfe08c49c8d90b55182b977cbcc87a694e8a81
 
 ## 字体生成
 
+### 公开发行候选：全 OFL 字体
+
+2026-09-24 使用 [Noto Sans CJK 2.004](https://github.com/notofonts/noto-cjk/tree/Sans2.004/Sans/Variable/TTF) 的 `NotoSansCJKsc-VF.ttf`（SHA-256 `990c807e79c25662a5a9ecf7f971baeb2bf2eab9a559e5ecf15cdfdb8561d21f`）和下述 Noto Emoji 字体（SHA-256 `de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551`）。两者依 SIL OFL 1.1；不得混入本机 Arial Unicode 字形。使用 FontTools 4.65.0、`hb-shape` 与本目录 Unicode 15.1 输入。在隔离目录运行，输出不写用户字体目录：
+
+```sh
+fonttools subset NotoSansCJKsc-VF.ttf '--unicodes=*' '--layout-features=' '--name-IDs=*' --output-file=NotoSansCJKsc-mapped.ttf
+fonttools varLib.instancer NotoSansCJKsc-mapped.ttf wght=400 --output=NotoSansCJKsc-static.ttf
+python3 repro/build_open_base_font.py --cjk-font NotoSansCJKsc-static.ttf --emoji-font NotoEmoji-wght.ttf --output-font IdentityV-Emoji-CJK-base.ttf
+python3 repro/build_font_v6.py --base-font IdentityV-Emoji-CJK-base.ttf --noto-font NotoEmoji-wght.ttf --output-font IdentityV-Emoji-CJK.ttf --work-dir font-work --report font-report.txt --family 'IdentityV Emoji CJK' --postscript-name IdentityVEmojiCJK-Regular
+```
+
+第一步必须去掉未使用的字形，否则源可变字体已有 65,535 个 glyph，无法加入 emoji。CJK 中没有 U+200B，`build_open_base_font.py` 会放入真正的空零宽字形供 GDI 对未合并控制符使用。最终单色字体候选为 46,196 glyph，SHA-256 `c002488492344453723dc491ecbe2646018f94a3060a8d0cb5829ef8b4d0d45b`。在原 emoji2 Wine 候选的隔离 prefix 上，`compositeRegression` 报告 `failures=0`；尚须游戏内与封包路径复核。FontTools 实例化阶段的 `head.modified` 默认写入构建时刻，因此上述命令重建的静态/最终字体字节 hash 可能不同；发行所用的实际字体必须在 catalog 中锁定 hash，并通过相同行为回归。若要求字节复现，在实例化后把 `head.modified` 固定为构建记录中的值并设置 `recalcTimestamp=False`，然后重建后续阶段。
+
+### 本机旧候选：不可分发的 Arial Unicode 基底
+
 v6 的 `--base-font` **不是任意 Arial 字体**。先准备不改动的 Arial Unicode 原字体和
 Google Noto Emoji 可变字体，安装 `fontTools` 与 `hb-shape`，生成 v1 基底：
 

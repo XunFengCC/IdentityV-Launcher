@@ -1307,7 +1307,8 @@ ensure_prefix_fonts() {
 }
 
 configure_catalog_cjk_font() {
-  local family filename expected target actual
+  local family filename expected target source temporary actual
+  actual=""
   family="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.fontConfiguration.cjkFamily" || true)"
   filename="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.fontConfiguration.cjkFilename" || true)"
   expected="$(plist_raw "$CATALOG_FILE" "engines.$SELECTED_ENGINE_ID.fontConfiguration.cjkSha256" || true)"
@@ -1317,6 +1318,25 @@ configure_catalog_cjk_font() {
   validate_relative_path "$filename" || return 1
   [[ "$filename" != */* && ${#expected} -eq 64 && "$expected" != *[!0-9A-Fa-f]* ]] || return 1
   target="$PREFIX/drive_c/windows/Fonts/$filename"
+  [[ ! -L "$target" ]] || return 1
+  # A newly installed App can ship an OFL font with its exact catalog hash.
+  # Prefix mutation happens only after the game collision guard and wineserver
+  # stop above; keep an already verified local maintainer font untouched.
+  if [[ -f "$target" ]]; then
+    actual="$(/usr/bin/shasum -a 256 "$target" | /usr/bin/awk '{print $1}')"
+  fi
+  if [[ "${actual:l}" != "${expected:l}" ]]; then
+    source="$APP_CONTENTS/Resources/Fonts/$filename"
+    [[ -f "$source" && ! -L "$source" ]] || return 1
+    actual="$(/usr/bin/shasum -a 256 "$source" | /usr/bin/awk '{print $1}')"
+    [[ "${actual:l}" == "${expected:l}" ]] || return 1
+    temporary="$(/usr/bin/mktemp "$target.tmp.XXXXXX")" || return 1
+    if ! /bin/cp "$source" "$temporary" || ! /bin/chmod 644 "$temporary" || ! /bin/mv -f "$temporary" "$target"; then
+      /bin/rm -f "$temporary"
+      return 1
+    fi
+    print -r -- "installed verified catalog font into prefix: $filename" >>"$LOG_FILE"
+  fi
   [[ -f "$target" && ! -L "$target" ]] || return 1
   actual="$(/usr/bin/shasum -a 256 "$target" | /usr/bin/awk '{print $1}')"
   [[ "${actual:l}" == "${expected:l}" ]] || return 1

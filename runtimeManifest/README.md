@@ -20,6 +20,20 @@ later self-built runtime cannot inherit an old interposer and double-inject it.
 This also makes a clean user installation behave like the tested development
 configuration.
 
+`candidateSelection.productDefault` identifies exactly one runtime used by the
+player product manager; that engine's `runtimeVersion` must equal the bundled
+bootstrap manifest version. The manager no longer keeps a separate hardcoded
+engine ID. `releasePackaging/releaseIdentity.py` checks uniqueness and matches
+the manifest's final file hashes to the selected catalog engine before
+packaging. RC1 publicly selected r1 even though emoji candidates appeared in
+the catalog; the explicit selection makes that difference visible.
+
+The source branch selects the tested `r1-emoji2` candidate as its product
+default. The root bootstrap manifest and catalog are kept on the same immutable
+runtime version so a clean source build downloads and verifies the matching
+GDI/font pair. The already published `v1.0.0-rc.1` tag still contains its
+original r1 selection and is not rewritten by this source update.
+
 `wine11-codeweavers-26_1-dxmt-0_80-selfbuilt-gnutls-macos15-r4` is a distinct
 maintainer candidate, not a replacement for
 `wine11-codeweavers-26_1-dxmt-0_80-macos15-alpha1-r1`. Its catalog record
@@ -35,7 +49,7 @@ distribution, its corresponding sources and notices still have to ship.
 
 `runtime-binding.json` is the per-user writable runtime-only binding; it is
 created only after `IdentityVRuntimeBootstrap` downloads the original upstream
-DMG, verifies it, applies the four bundled patch payloads and publishes its
+DMG, verifies it, applies the bundled patch payloads and publishes its
 `current` directory atomically. `installation.json` is written only after a
 complete mainland game/prefix publish; the global runner combines the runtime
 binding with its complete product record. Every engine key must exist in the
@@ -76,10 +90,10 @@ DXMT runtime。当前 `wine11-codeweavers-26_1-dxmt-0_80-macos15-alpha1-r1`
 
 自产候选必须拥有新的 engine/version ID、不可变版本目录、完整关键文件摘要和独立
 prefix；在 macOS 27 的分层门通过前，不得更新 `current`、`runtime-binding.json`、
-任何游戏安装记录或 RC 默认引擎。`IdentityVProductManager` 目前仍把 Alpha engine ID
-写死为上述 fallback，`RuntimeBootstrap` 也只接收单一 manifest；因此“只往 catalog
-增加一项”不会让新候选进入安装链。真正接入前必须先把 bootstrap manifest 路由和
-产品管理器选择改成显式、可回退的多 engine 契约。
+任何游戏安装记录或 RC 默认引擎。`IdentityVProductManager` 现在从 catalog 的唯一
+`productDefault` 读取 engine ID，`RuntimeBootstrap` 仍只接收单一 manifest；因此
+“只往 catalog 增加一项”不会让新候选进入安装链。真正接入前必须同时更新 manifest、
+默认标记、运行时补丁、字体资源与回退方案，并通过封包身份核对。
 
 把现有 yanyun runtime 做 APFS clone 仍可用于单模块 A/B，但不能被称为自产候选。
 自产定义要求 CodeWeavers Wine、DXMT、MoltenVK 与实际 native closure 都有明确的

@@ -25,8 +25,8 @@ IdentityVRuntimeBootstrap install --manifest /absolute/runtime-manifest.json \
   --patch-root /absolute/read-only-patch-payloads
 ```
 
-`patch-root` 由安装器提供，必须含 manifest 中四个相对 payload 名：`winemac.so`、
-`libgmp.10.dylib`、`libpcre2-8.0.dylib` 和 `libzstd.1.dylib`。helper 不会创建、启动或读取任何 Wine
+`patch-root` 由安装器提供，必须含 manifest 中所有相对 payload 名。当前主干默认候选还含
+`gdi32.dll`（PE AMD64）；其余四枚 runtime patch 是按哈希锁定的 Mach-O 文件。helper 不会创建、启动或读取任何 Wine
 prefix，也不会启动游戏。它拒绝符号链接、路径逃逸、损坏/缺失 patch、非预期重定向和任何版本冲突；失败时
 不发布 `current`，并卸载临时 DMG。网络中断留下的 staging 会在下一次安全清理，不会被当作完成版本复用。
 
@@ -44,7 +44,7 @@ prefix，也不会启动游戏。它拒绝符号链接、路径逃逸、损坏/�
 IdentityVRuntimeBootstrap verify-tree --manifest /absolute/runtime-manifest.json --tree /absolute/runtime
 ```
 
-当前 manifest 是 macOS 15 Alpha 组合候选；其四枚自建 patch 与关键运行时哈希来自
+当前主干 manifest 指向带 emoji GDI 修复的独立 `r1-emoji2` runtime；基础 runtime 仍按固定来源在用户机器下载。四枚已有 Mach-O patch 与关键运行时哈希来自
 [`../runtimeManifest/macosCompatibilityAudit.md`](../runtimeManifest/macosCompatibilityAudit.md)。
 
 ## 补丁载荷的签名与哈希契约（2026-09-21）
@@ -60,9 +60,10 @@ IdentityVRuntimeBootstrap verify-tree --manifest /absolute/runtime-manifest.json
   **已签名**哈希，由 staging 脚本从实际签名产物刷新，不反向校验可复现构建。
 
 `verifyRuntimePatchPayloads.command` 与 `main.go` 继续使用 `sha256`（分发契约）。任何
-改动补丁字节的步骤都必须让 staging 脚本刷新这两处哈希，否则 runner 会在启动时以
-`integrity check failed` 中止。已签名补丁的功能尚未在真实游戏中单独回归，替换已装
-runtime 里这四枚文件时应先保留原文件以便回退。
+改动补丁字节的步骤都必须让 staging 脚本刷新对应哈希，否则 runner 会在启动时以
+`integrity check failed` 中止。四枚 Mach-O 文件按原签名流程锁定；emoji GDI 是未签名的
+PE AMD64 DLL，由 runtime helper 检查架构与哈希。所有候选都安装到新的不可变 runtime
+目录，不能覆盖已装 runtime 的文件。
 
 2026-09-23 从空运行环境首装时发现一个先前被已有缓存遮住的失败路径：bootstrap
 以 `DisallowUnknownFields` 解析**同一份** manifest，但原先的 `patchSpec` 漏掉仅供 staging
